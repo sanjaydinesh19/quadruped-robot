@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+
+# ROS2
+log/
+install/
+build/
+devel/
+
+# Isaac Sim / USD
+*.usd
+*.usdc
+*.usdz
+*.bak
+_output/
+
+# Gazebo
+*.world.bak
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+*.junit.xml
+
+# MCP server
+mcp_server/.env
+mcp_server/node_modules/
+mcp_server/__pycache__/
+
+# Logs
+*.log
+logs/

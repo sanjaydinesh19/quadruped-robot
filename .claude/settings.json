@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "quadruped": {
+      "command": "python",
+      "args": ["mcp_server/server.py"],
+      "cwd": "/home/sanjay/Projects/Quadruped",
+      "env": {
+        "PYTHONPATH": "/home/sanjay/Projects/Quadruped"
+      }
+    }
+  }
+}
