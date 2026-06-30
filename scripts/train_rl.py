@@ -51,7 +51,6 @@ import torch
 
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
-from isaaclab_rl.rsl_rl.utils import handle_deprecated_rsl_rl_cfg
 from rsl_rl.runners import OnPolicyRunner
 
 # Register our gymnasium environment and get the config
@@ -76,29 +75,37 @@ if args_cli.max_iterations is not None:
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "rsl_rl")
 os.makedirs(log_dir, exist_ok=True)
 
-try:
-    # Container's rsl_rl has no __version__; handle_deprecated_rsl_rl_cfg may
-    # raise AttributeError probing it.  Catch and fall back to the raw dict.
-    runner_cfg_dict = handle_deprecated_rsl_rl_cfg(runner_cfg.to_dict())
-except Exception as _exc:
-    print(f"[train_rl] handle_deprecated_rsl_rl_cfg failed ({_exc}), using raw cfg")
-    runner_cfg_dict = runner_cfg.to_dict()
+runner_cfg_dict = runner_cfg.to_dict()
 
-# Safety-net whitelist: isaaclab_rl emits backward-compat fields ('stochastic',
-# 'init_noise_std', ...) that the container's MLPModel may not accept.
-# handle_deprecated_rsl_rl_cfg already strips them for rsl_rl >= 5.0; the
-# whitelist covers the case where rsl_rl is older and the function does nothing.
-_VALID_MLP_KWARGS = {"class_name", "hidden_dims", "activation", "obs_normalization", "distribution_cfg"}
-for _model_key in ("actor", "critic"):
-    if isinstance(runner_cfg_dict.get(_model_key), dict):
-        runner_cfg_dict[_model_key] = {
-            k: v for k, v in runner_cfg_dict[_model_key].items()
-            if k in _VALID_MLP_KWARGS
-        }
+# ── API adapter: new isaaclab_rl uses actor/critic split; the container's
+#    rsl_rl runner reads a single "policy" key (ActorCritic).
+#    Build it from our actor/critic configs so both API shapes are present.
+_actor = runner_cfg_dict.get("actor") or {}
+_critic = runner_cfg_dict.get("critic") or {}
+_dist = _actor.get("distribution_cfg") or {}
+runner_cfg_dict["policy"] = {
+    "class_name": "ActorCritic",
+    "actor_hidden_dims":  _actor.get("hidden_dims", [512, 256, 128]),
+    "critic_hidden_dims": _critic.get("hidden_dims", [512, 256, 128]),
+    "activation":         _actor.get("activation", "elu"),
+    "init_noise_std": (_dist.get("init_std") if isinstance(_dist, dict) else 1.0) or 1.0,
+}
 
-_alg_dbg = {k: v for k, v in runner_cfg_dict.get("algorithm", {}).items()
-             if k not in ("rnd_cfg", "symmetry_cfg")}
-print(f"[train_rl] algorithm cfg: {_alg_dbg}")
+# ── Strip fields from the algorithm dict that the container's PPO doesn't accept.
+_VALID_ALG_KWARGS = {
+    "class_name", "num_learning_epochs", "num_mini_batches", "learning_rate",
+    "schedule", "gamma", "lam", "entropy_coef", "desired_kl", "max_grad_norm",
+    "optimizer", "value_loss_coef", "use_clipped_value_loss", "clip_param",
+    "normalize_advantage_per_mini_batch",
+}
+if isinstance(runner_cfg_dict.get("algorithm"), dict):
+    runner_cfg_dict["algorithm"] = {
+        k: v for k, v in runner_cfg_dict["algorithm"].items()
+        if k in _VALID_ALG_KWARGS
+    }
+
+print(f"[train_rl] policy cfg:    {runner_cfg_dict['policy']}")
+print(f"[train_rl] algorithm cfg: {runner_cfg_dict['algorithm']}")
 
 runner = OnPolicyRunner(
     env,
