@@ -100,14 +100,14 @@ runner.load(args_cli.checkpoint)
 policy = runner.get_inference_policy(device=env.device)
 
 # ── Run ───────────────────────────────────────────────────────────────────────
-obs, _ = env.reset()
+obs = env.reset()   # RslRlVecEnvWrapper returns obs directly
 frames = []
 step = 0
 
 while simulation_app.is_running():
     with torch.inference_mode():
         actions = policy(obs)
-    obs, _, _, _, _ = env.step(actions)
+    obs, _, _, _ = env.step(actions)   # RslRlVecEnvWrapper: (obs, rew, done, extras)
 
     if args_cli.video:
         frame = env.unwrapped.render()   # bypass wrapper; ManagerBasedRLEnv returns (H,W,3)
