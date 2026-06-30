@@ -112,8 +112,8 @@ conda activate isaaclab
 ### 6. Train
 
 ```bash
-# Local RTX 3050 4 GB (development)
-~/Projects/IsaacLab/isaaclab.sh -p scripts/train_rl.py --num_envs 32
+# Local RTX 3050 4 GB — must use --headless (RTX viewport needs ~7.5 GB VRAM)
+~/Projects/IsaacLab/isaaclab.sh -p scripts/train_rl.py --num_envs 32 --headless
 
 # Cloud A100 (full training run, headless)
 ~/Projects/IsaacLab/isaaclab.sh -p scripts/train_rl.py --num_envs 2048 --headless

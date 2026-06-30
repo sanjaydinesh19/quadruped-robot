@@ -37,6 +37,9 @@ parser = argparse.ArgumentParser(description="Quadruped locomotion RL training")
 parser.add_argument("--num_envs",       type=int,  default=32)
 parser.add_argument("--resume",         action="store_true")
 parser.add_argument("--max_iterations", type=int,  default=None)
+# NOTE: RTX 3050 Ti (4 GB VRAM) cannot run the Isaac Sim viewport — the ray-tracing
+# TLAS alone needs ~7.5 GB. Always pass --headless on this machine.
+# Remove --headless when running on a cloud GPU with 8 GB+ VRAM.
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
