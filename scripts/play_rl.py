@@ -100,7 +100,7 @@ runner.load(args_cli.checkpoint)
 policy = runner.get_inference_policy(device=env.device)
 
 # ── Run ───────────────────────────────────────────────────────────────────────
-obs = env.reset()   # RslRlVecEnvWrapper returns obs directly
+obs, _ = env.reset()   # (obs_dict TensorDict, info)
 frames = []
 step = 0
 
