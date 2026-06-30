@@ -262,16 +262,8 @@ class RewardsCfg:
     action_rate_l2 = RewardTermCfg(func=mdp.action_rate_l2, weight=-0.01)
 
     # ── Gait quality ──────────────────────────────────────────────────────────
-    # Reward for feet spending time in the air (encourages proper stepping).
-    feet_air_time = RewardTermCfg(
-        func=mdp.feet_air_time,
-        weight=0.125,
-        params={
-            "command_name": "base_velocity",
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot_link"),
-            "threshold": 0.5,
-        },
-    )
+    # feet_air_time disabled: mdp.feet_air_time was removed in isaaclab 2.3.x.
+    # Re-enable once the replacement function name is confirmed (grep rewards.py).
     # Penalise contacts on shin or thigh (robot should only touch ground with feet).
     undesired_contacts = RewardTermCfg(
         func=mdp.undesired_contacts,
