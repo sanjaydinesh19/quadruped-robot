@@ -51,6 +51,7 @@ import torch
 
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
+from isaaclab_rl.rsl_rl.utils import handle_deprecated_rsl_rl_cfg
 from rsl_rl.runners import OnPolicyRunner
 
 # Register our gymnasium environment and get the config
@@ -75,12 +76,11 @@ if args_cli.max_iterations is not None:
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "rsl_rl")
 os.makedirs(log_dir, exist_ok=True)
 
-runner_cfg_dict = runner_cfg.to_dict()
-# isaaclab_rl's RslRlMLPModelCfg emits backward-compat fields ('stochastic',
-# 'init_noise_std', ...) for old rsl_rl versions, but the Kit Python's
-# MLPModel.__init__() only accepts the four kwargs below.  Whitelist them so
-# we never hit an unexpected-keyword-argument TypeError regardless of which
-# legacy fields the config emits.
+runner_cfg_dict = handle_deprecated_rsl_rl_cfg(runner_cfg.to_dict())
+# Safety-net whitelist: isaaclab_rl emits backward-compat fields ('stochastic',
+# 'init_noise_std', ...) that the container's MLPModel may not accept.
+# handle_deprecated_rsl_rl_cfg already strips them for rsl_rl >= 5.0; the
+# whitelist covers the case where rsl_rl is older and the function does nothing.
 _VALID_MLP_KWARGS = {"class_name", "hidden_dims", "activation", "obs_normalization", "distribution_cfg"}
 for _model_key in ("actor", "critic"):
     if isinstance(runner_cfg_dict.get(_model_key), dict):

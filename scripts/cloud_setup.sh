@@ -52,6 +52,12 @@ echo "[3/4] Installing Isaac Lab extensions (uses Kit Python, ~5 min)..."
 cd "$ISAACLAB_PATH"
 ./isaaclab.sh --install
 
+# The container ships an older rsl_rl build that is mismatched with Isaac Lab
+# main's isaaclab_rl (construct_algorithm API changed in rsl_rl 4.x → 5.x).
+# Upgrade inside the Kit Python so both sides see the same API.
+echo "[3/4] Upgrading rsl-rl in Kit Python to match Isaac Lab main..."
+"$ISAACLAB_PATH/_isaac_sim/python.sh" -m pip install --upgrade rsl-rl
+
 # ── 4. Generate URDF + convert to USD ────────────────────────────────────────
 cd "$REPO_ROOT"
 
