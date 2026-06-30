@@ -44,15 +44,13 @@ echo "[convert_to_usd] URDF  : $URDF"
 echo "[convert_to_usd] Output: $OUTPUT_DIR/quadruped.usd"
 echo "[convert_to_usd] Running Isaac Lab URDF importer (headless)..."
 
-# --merge-fixed-joints: fuses the four fixed foot joints into the shin links,
+# --merge-joints: fuses the four fixed foot joints into their shin links,
 #   reducing articulation complexity without losing collision geometry.
-# --make-instanceable: creates a reference USD so Isaac Lab can spawn
-#   thousands of parallel robot instances efficiently.
+#   (Isaac Lab 4.5 renamed --merge-fixed-joints → --merge-joints)
 "$ISAACLAB" -p "$ISAACLAB_PATH/scripts/tools/convert_urdf.py" \
   "$URDF" \
   "$OUTPUT_DIR" \
-  --merge-fixed-joints \
-  --make-instanceable \
+  --merge-joints \
   --headless
 
 echo "[convert_to_usd] Done → $OUTPUT_DIR/quadruped.usd"
