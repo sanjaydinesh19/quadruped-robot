@@ -126,9 +126,9 @@ class QuadrupedSceneCfg(InteractiveSceneCfg):
         },
     )
 
-    # Contact sensors on foot spheres — used for air-time reward + termination.
+    # Contact sensors on shin links — foot_link was merged into shin_link by --merge-joints.
     contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*_foot_link",
+        prim_path="{ENV_REGEX_NS}/Robot/.*_shin_link",
         history_length=3,
         track_air_time=True,
     )
@@ -271,7 +271,7 @@ class RewardsCfg:
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
-                body_names=[".*_thigh_link", ".*_shin_link"],
+                body_names=[".*_thigh_link"],
             ),
             "threshold": 1.0,
         },
