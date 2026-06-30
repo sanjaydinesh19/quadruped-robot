@@ -245,8 +245,15 @@ class RewardsCfg:
 
     # ── Stability penalties ───────────────────────────────────────────────────
     lin_vel_z_l2 = RewardTermCfg(func=mdp.lin_vel_z_l2, weight=-2.0)
-    ang_vel_xy_l2 = RewardTermCfg(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    flat_orientation_l2 = RewardTermCfg(func=mdp.flat_orientation_l2, weight=-2.0)
+    ang_vel_xy_l2 = RewardTermCfg(func=mdp.ang_vel_xy_l2, weight=-0.2)
+    # Increased from -2.0: robot was pitching forward to exploit velocity reward.
+    flat_orientation_l2 = RewardTermCfg(func=mdp.flat_orientation_l2, weight=-5.0)
+    # Penalise crouching — body centre should stay near nominal 0.32 m standing height.
+    base_height_l2 = RewardTermCfg(
+        func=mdp.base_height_l2,
+        weight=-10.0,
+        params={"target_height": 0.32},
+    )
 
     # ── Joint health penalties ────────────────────────────────────────────────
     joint_pos_limits = RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0)
@@ -262,16 +269,20 @@ class RewardsCfg:
     action_rate_l2 = RewardTermCfg(func=mdp.action_rate_l2, weight=-0.01)
 
     # ── Gait quality ──────────────────────────────────────────────────────────
-    # feet_air_time disabled: mdp.feet_air_time was removed in isaaclab 2.3.x.
-    # Re-enable once the replacement function name is confirmed (grep rewards.py).
-    # Penalise contacts on shin or thigh (robot should only touch ground with feet).
+    # Pull joints toward the default standing pose — acts as a gait regularizer.
+    # isaaclab 2.3.x has no feet_air_time; this is the closest available substitute.
+    joint_deviation_l1 = RewardTermCfg(
+        func=mdp.joint_deviation_l1,
+        weight=-0.1,
+    )
+    # Penalise contacts on thighs or shins (only feet should touch the ground).
     undesired_contacts = RewardTermCfg(
         func=mdp.undesired_contacts,
         weight=-1.0,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
-                body_names=[".*_thigh_link"],
+                body_names=[".*_thigh_link", ".*_shin_link"],
             ),
             "threshold": 1.0,
         },
