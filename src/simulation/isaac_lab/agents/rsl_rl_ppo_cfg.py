@@ -1,17 +1,13 @@
 """
-RSL-RL PPO configuration for the quadruped flat-terrain task.
+RSL-RL PPO configuration for the quadruped flat-terrain task (rsl_rl >= 4.0.0 API).
 
-RSL-RL is the on-policy RL library that ships with Isaac Lab (originally from
-ETH Zurich's Robotic Systems Lab — hence the name). It implements PPO with
-a few locomotion-specific tweaks.
-
-Tuned for:
-  - Local RTX 3050 4GB:  num_envs=32,  batch≈768  steps
-  - Cloud A100 80GB:     num_envs=4096, batch≈98 304 steps  (change in train.py)
+isaaclab_rl 0.5.x / rsl_rl 4.x replaced the monolithic RslRlPpoActorCriticCfg
+with separate RslRlMLPModelCfg for actor and critic, and removed use_clipping /
+clip_param from the algorithm config in favour of use_clipped_value_loss.
 """
 from isaaclab_rl.rsl_rl import (
     RslRlOnPolicyRunnerCfg,
-    RslRlPpoActorCriticCfg,
+    RslRlMLPModelCfg,
     RslRlPpoAlgorithmCfg,
 )
 from isaaclab.utils import configclass
@@ -21,29 +17,40 @@ from isaaclab.utils import configclass
 class QuadrupedPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     """Training runner — controls logging, checkpointing, and iteration count."""
 
-    num_steps_per_env = 24      # rollout length per environment per update
-    max_iterations    = 3000    # total gradient steps (≈ 20–30 min on A100)
-    save_interval     = 200     # save checkpoint every N iterations
-    experiment_name   = "quadruped_flat"
-    empirical_normalization = False
+    num_steps_per_env: int = 24
+    max_iterations: int = 3000
+    save_interval: int = 200
+    experiment_name: str = "quadruped_flat"
+    empirical_normalization: bool = False
 
-    policy = RslRlPpoActorCriticCfg(
-        init_noise_std=1.0,
-        # Three hidden layers; the 512→256→128 funnel is standard for locomotion.
-        actor_hidden_dims=[512, 256, 128],
-        critic_hidden_dims=[512, 256, 128],
+    # Map env observation groups → algorithm observation sets.
+    # Our env exposes a single "policy" group; both actor and critic see it.
+    obs_groups = {"actor": ["policy"], "critic": ["policy"]}
+
+    # Actor: stochastic MLP with Gaussian output (mean + fixed std).
+    actor = RslRlMLPModelCfg(
+        hidden_dims=[512, 256, 128],
+        activation="elu",
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(
+            init_std=1.0,
+            std_type="scalar",
+        ),
+    )
+
+    # Critic: deterministic value MLP (no distribution needed).
+    critic = RslRlMLPModelCfg(
+        hidden_dims=[512, 256, 128],
         activation="elu",
     )
 
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
-        use_clipping=True,
-        clip_param=0.2,
+        use_clipped_value_loss=True,
         entropy_coef=0.01,
         num_learning_epochs=5,
-        num_mini_batches=4,     # mini-batch size = (num_envs × num_steps) / 4
+        num_mini_batches=4,
         learning_rate=1.0e-3,
-        schedule="adaptive",    # adjusts LR to keep KL divergence near desired_kl
+        schedule="adaptive",
         gamma=0.99,
         lam=0.95,
         desired_kl=0.01,
