@@ -95,7 +95,7 @@ runner_cfg_dict["policy"] = {
 _VALID_ALG_KWARGS = {
     "class_name", "num_learning_epochs", "num_mini_batches", "learning_rate",
     "schedule", "gamma", "lam", "entropy_coef", "desired_kl", "max_grad_norm",
-    "optimizer", "value_loss_coef", "use_clipped_value_loss", "clip_param",
+    "value_loss_coef", "use_clipped_value_loss", "clip_param",
     "normalize_advantage_per_mini_batch",
 }
 if isinstance(runner_cfg_dict.get("algorithm"), dict):
