@@ -76,7 +76,14 @@ if args_cli.max_iterations is not None:
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "rsl_rl")
 os.makedirs(log_dir, exist_ok=True)
 
-runner_cfg_dict = handle_deprecated_rsl_rl_cfg(runner_cfg.to_dict())
+try:
+    # Container's rsl_rl has no __version__; handle_deprecated_rsl_rl_cfg may
+    # raise AttributeError probing it.  Catch and fall back to the raw dict.
+    runner_cfg_dict = handle_deprecated_rsl_rl_cfg(runner_cfg.to_dict())
+except Exception as _exc:
+    print(f"[train_rl] handle_deprecated_rsl_rl_cfg failed ({_exc}), using raw cfg")
+    runner_cfg_dict = runner_cfg.to_dict()
+
 # Safety-net whitelist: isaaclab_rl emits backward-compat fields ('stochastic',
 # 'init_noise_std', ...) that the container's MLPModel may not accept.
 # handle_deprecated_rsl_rl_cfg already strips them for rsl_rl >= 5.0; the
@@ -88,6 +95,10 @@ for _model_key in ("actor", "critic"):
             k: v for k, v in runner_cfg_dict[_model_key].items()
             if k in _VALID_MLP_KWARGS
         }
+
+_alg_dbg = {k: v for k, v in runner_cfg_dict.get("algorithm", {}).items()
+             if k not in ("rnd_cfg", "symmetry_cfg")}
+print(f"[train_rl] algorithm cfg: {_alg_dbg}")
 
 runner = OnPolicyRunner(
     env,
