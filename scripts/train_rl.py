@@ -75,9 +75,17 @@ if args_cli.max_iterations is not None:
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "rsl_rl")
 os.makedirs(log_dir, exist_ok=True)
 
+runner_cfg_dict = runner_cfg.to_dict()
+# rsl_rl 5.x removed 'stochastic' from MLPModel.__init__() but isaaclab_rl's
+# RslRlMLPModelCfg still emits it for backward compat. Strip it before handing
+# the dict to the runner so we don't get an unexpected-kwarg TypeError.
+for _model_key in ("actor", "critic"):
+    if isinstance(runner_cfg_dict.get(_model_key), dict):
+        runner_cfg_dict[_model_key].pop("stochastic", None)
+
 runner = OnPolicyRunner(
     env,
-    runner_cfg.to_dict(),
+    runner_cfg_dict,
     log_dir=log_dir,
     device="cuda:0",
 )
