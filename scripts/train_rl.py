@@ -50,7 +50,8 @@ simulation_app = app_launcher.app
 import torch
 
 from isaaclab.envs import ManagerBasedRLEnv
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunner
+from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
+from rsl_rl.runners import OnPolicyRunner
 
 # Register our gymnasium environment and get the config
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -64,6 +65,7 @@ env_cfg = QuadrupedFlatEnvCfg()
 env_cfg.scene.num_envs = args_cli.num_envs
 
 env = ManagerBasedRLEnv(cfg=env_cfg)
+env = RslRlVecEnvWrapper(env)
 
 # ── Step 4: configure runner ──────────────────────────────────────────────────
 runner_cfg = QuadrupedPPORunnerCfg()
@@ -73,7 +75,7 @@ if args_cli.max_iterations is not None:
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "rsl_rl")
 os.makedirs(log_dir, exist_ok=True)
 
-runner = RslRlOnPolicyRunner(
+runner = OnPolicyRunner(
     env,
     runner_cfg.to_dict(),
     log_dir=log_dir,
