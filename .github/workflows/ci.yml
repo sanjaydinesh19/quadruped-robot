@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install ".[dev]"
       - name: Lint
         run: ruff check src/ tests/ mcp_server/
       - name: Type check
