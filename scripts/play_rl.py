@@ -34,9 +34,10 @@ parser.add_argument("--video_length", type=int, default=500,
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
-# Viewer is only useful without --video; --headless must be set by the user
-# when running on a remote pod with --video.
-if not args_cli.video:
+# Video mode needs the offscreen renderer; viewer mode forces headless off.
+if args_cli.video:
+    args_cli.enable_cameras = True   # Isaac Sim offscreen frame capture
+else:
     args_cli.headless = False
 
 app_launcher = AppLauncher(args_cli)
@@ -58,7 +59,8 @@ env_cfg = QuadrupedFlatEnvCfg()
 env_cfg.scene.num_envs = args_cli.num_envs
 env_cfg.episode_length_s = 60.0
 
-env = ManagerBasedRLEnv(cfg=env_cfg)
+render_mode = "rgb_array" if args_cli.video else None
+env = ManagerBasedRLEnv(cfg=env_cfg, render_mode=render_mode)
 
 if args_cli.video:
     video_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "videos")
