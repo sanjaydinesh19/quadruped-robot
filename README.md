@@ -108,6 +108,45 @@ Access at `https://<pod-id>-6006.proxy.runpod.net`.
   --num_envs 2048 --headless --resume
 ```
 
+### 6. Record and download a policy video
+
+**Record** (replace `model_2800.pt` with any checkpoint):
+
+```bash
+/workspace/isaaclab/isaaclab.sh -p scripts/play_rl.py \
+  --checkpoint /workspace/Quadruped/logs/rsl_rl/model_2800.pt \
+  --num_envs 1 \
+  --headless --video --video_length 500
+```
+
+Saves to `videos/play.mp4` (~2 min). Rename to keep track of the checkpoint:
+
+```bash
+mv /workspace/Quadruped/videos/play.mp4 /workspace/Quadruped/videos/model_2800.mp4
+```
+
+**Serve** (stop TensorBoard first if it is running on port 6006):
+
+```bash
+pkill -f tensorboard 2>/dev/null
+cd /workspace/Quadruped/videos && \
+  /workspace/isaaclab/_isaac_sim/kit/python/bin/python3 -m http.server 6006
+```
+
+**Download** — open in a browser:
+
+```
+https://<pod-id>-6006.proxy.runpod.net/model_2800.mp4
+```
+
+Right-click the video → **Save Video As**.
+
+**Restore TensorBoard** when done (new SSH session or after Ctrl+C):
+
+```bash
+tensorboard --logdir /workspace/Quadruped/logs/rsl_rl --port 6006 --bind_all
+```
+
 ---
 
 ## Local Development
