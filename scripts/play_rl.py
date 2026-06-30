@@ -4,15 +4,14 @@ Load a trained checkpoint and run the quadruped policy.
 
 Viewer mode (local, needs display):
     ~/IsaacLab/isaaclab.sh -p scripts/play_rl.py \
-        --checkpoint logs/rsl_rl/<run>/model_3000.pt
+        --checkpoint logs/rsl_rl/model_3000.pt
 
-Video mode (cloud / headless — saves MP4):
+Video mode (cloud / headless — saves MP4 then download with scp):
     ~/IsaacLab/isaaclab.sh -p scripts/play_rl.py \
-        --checkpoint logs/rsl_rl/<run>/model_3000.pt \
+        --checkpoint logs/rsl_rl/model_3000.pt \
         --headless --video --video_length 500
 
-Download the video:
-    scp <user>@ssh.runpod.io:/workspace/Quadruped/videos/*.mp4 .
+    scp <user>@ssh.runpod.io:/workspace/Quadruped/videos/play.mp4 .
 """
 from __future__ import annotations
 
@@ -28,23 +27,23 @@ parser.add_argument("--checkpoint", type=str, required=True,
 parser.add_argument("--num_envs", type=int, default=4,
                     help="Number of parallel robots to display")
 parser.add_argument("--video", action="store_true",
-                    help="Record video to file (enables headless rendering)")
+                    help="Record video to file (use with --headless on cloud)")
 parser.add_argument("--video_length", type=int, default=500,
-                    help="Number of steps to record (default: 500 ≈ 10 s)")
+                    help="Number of steps to record (default: 500 ≈ 10 s at 50 Hz)")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 # Video mode needs the offscreen renderer; viewer mode forces headless off.
 if args_cli.video:
-    args_cli.enable_cameras = True   # Isaac Sim offscreen frame capture
+    args_cli.enable_cameras = True
 else:
     args_cli.headless = False
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+import numpy as np
 import torch
-import gymnasium as gym
 from isaaclab.envs import ManagerBasedRLEnv
 from rsl_rl.runners import OnPolicyRunner
 
@@ -62,17 +61,10 @@ env_cfg.episode_length_s = 60.0
 render_mode = "rgb_array" if args_cli.video else None
 env = ManagerBasedRLEnv(cfg=env_cfg, render_mode=render_mode)
 
+video_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "videos")
 if args_cli.video:
-    video_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "videos")
     os.makedirs(video_dir, exist_ok=True)
-    env = gym.wrappers.RecordVideo(
-        env,
-        video_folder=video_dir,
-        step_trigger=lambda step: step == 0,
-        video_length=args_cli.video_length,
-        disable_logger=True,
-    )
-    print(f"[play_rl] Recording {args_cli.video_length} steps → {video_dir}/")
+    print(f"[play_rl] Will record {args_cli.video_length} steps → {video_dir}/play.mp4")
 
 # ── Load policy (same API adapter as train_rl.py) ────────────────────────────
 runner_cfg = QuadrupedPPORunnerCfg()
@@ -107,14 +99,36 @@ policy = runner.get_inference_policy(device=env.device)
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 obs, _ = env.reset()
+frames = []
 step = 0
+
 while simulation_app.is_running():
     with torch.inference_mode():
         actions = policy(obs)
     obs, _, _, _, _ = env.step(actions)
+
+    if args_cli.video:
+        frame = env.render()   # (H, W, 3) uint8 with render_mode="rgb_array"
+        if frame is not None:
+            frames.append(frame)
+
     step += 1
     if args_cli.video and step >= args_cli.video_length:
         break
+
+# ── Save video ────────────────────────────────────────────────────────────────
+if args_cli.video and frames:
+    try:
+        import imageio
+        video_path = os.path.join(video_dir, "play.mp4")
+        imageio.mimsave(video_path, frames, fps=50)
+        print(f"[play_rl] Saved {len(frames)} frames → {video_path}")
+    except ImportError:
+        # Fall back to saving individual PNG frames if imageio is missing
+        for i, f in enumerate(frames):
+            from PIL import Image
+            Image.fromarray(f).save(os.path.join(video_dir, f"frame_{i:05d}.png"))
+        print(f"[play_rl] imageio not found — saved {len(frames)} PNGs to {video_dir}/")
 
 env.close()
 simulation_app.close()
