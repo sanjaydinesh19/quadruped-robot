@@ -45,6 +45,7 @@ simulation_app = app_launcher.app
 import numpy as np
 import torch
 from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
 from rsl_rl.runners import OnPolicyRunner
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -60,6 +61,7 @@ env_cfg.episode_length_s = 60.0
 
 render_mode = "rgb_array" if args_cli.video else None
 env = ManagerBasedRLEnv(cfg=env_cfg, render_mode=render_mode)
+env = RslRlVecEnvWrapper(env)   # adds get_observations() that OnPolicyRunner expects
 
 video_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "videos")
 if args_cli.video:
@@ -108,7 +110,7 @@ while simulation_app.is_running():
     obs, _, _, _, _ = env.step(actions)
 
     if args_cli.video:
-        frame = env.render()   # (H, W, 3) uint8 with render_mode="rgb_array"
+        frame = env.unwrapped.render()   # bypass wrapper; ManagerBasedRLEnv returns (H,W,3)
         if frame is not None:
             frames.append(frame)
 
