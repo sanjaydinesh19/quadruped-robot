@@ -5,12 +5,12 @@ isaaclab_rl 0.5.x / rsl_rl 4.x replaced the monolithic RslRlPpoActorCriticCfg
 with separate RslRlMLPModelCfg for actor and critic, and removed use_clipping /
 clip_param from the algorithm config in favour of use_clipped_value_loss.
 """
+from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import (
-    RslRlOnPolicyRunnerCfg,
     RslRlMLPModelCfg,
+    RslRlOnPolicyRunnerCfg,
     RslRlPpoAlgorithmCfg,
 )
-from isaaclab.utils import configclass
 
 
 @configclass

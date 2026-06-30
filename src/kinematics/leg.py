@@ -13,9 +13,11 @@ Link lengths (placeholder values — update from robot config):
   l_shin       : shin link length  (knee → foot)
 """
 from __future__ import annotations
+
+from typing import Any
+
 import numpy as np
 from numpy.typing import NDArray
-
 
 # fmt: off
 _LEG_SIGNS = {
@@ -47,7 +49,7 @@ class LegKinematics:
     # ------------------------------------------------------------------
     # Forward kinematics
     # ------------------------------------------------------------------
-    def forward(self, joint_angles_rad: list[float] | NDArray) -> NDArray:
+    def forward(self, joint_angles_rad: list[float] | NDArray[np.floating[Any]]) -> NDArray[np.floating[Any]]:
         """Return foot position [x, y, z] in body frame (metres)."""
         q0, q1, q2 = joint_angles_rad
         sign = self._sign
@@ -68,7 +70,7 @@ class LegKinematics:
     # ------------------------------------------------------------------
     # Inverse kinematics  (analytical solution)
     # ------------------------------------------------------------------
-    def inverse(self, foot_pos_m: list[float] | NDArray) -> NDArray:
+    def inverse(self, foot_pos_m: list[float] | NDArray[np.floating[Any]]) -> NDArray[np.floating[Any]]:
         """
         Return joint angles [hip, thigh, knee] in radians for a desired foot
         position [x, y, z] in body frame.

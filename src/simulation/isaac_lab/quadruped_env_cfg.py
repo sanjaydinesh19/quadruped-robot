@@ -30,11 +30,11 @@ Actions (12-dim)
 from __future__ import annotations
 
 import math
-import os
 from pathlib import Path
 
 import isaaclab.envs.mdp as mdp
 import isaaclab.sim as sim_utils
+from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import (
@@ -45,7 +45,6 @@ from isaaclab.managers import (
     SceneEntityCfg,
     TerminationTermCfg,
 )
-from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.utils import configclass

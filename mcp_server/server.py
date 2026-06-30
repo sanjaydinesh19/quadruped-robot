@@ -7,15 +7,15 @@ Then register in .claude/settings.json under mcpServers.
 """
 import asyncio
 import json
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 try:
     import mcp.server.stdio
     from mcp.server import Server
-    from mcp.types import Tool, TextContent
+    from mcp.types import TextContent, Tool
 except ImportError:
     print("ERROR: mcp package not found. Run: pip install mcp", file=sys.stderr)
     sys.exit(1)

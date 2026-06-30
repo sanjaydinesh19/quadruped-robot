@@ -1,6 +1,7 @@
 """Round-trip FK → IK consistency tests."""
 import numpy as np
 import pytest
+
 from src.kinematics.leg import LegKinematics
 
 
