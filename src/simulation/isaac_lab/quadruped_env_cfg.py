@@ -126,9 +126,10 @@ class QuadrupedSceneCfg(InteractiveSceneCfg):
         },
     )
 
-    # Contact sensors on shin links — foot_link was merged into shin_link by --merge-joints.
+    # Contact sensors on all robot bodies — rewards/terminations filter by body_names.
+    # foot_link was merged into shin_link by --merge-joints so shin contact = foot contact.
     contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*_shin_link",
+        prim_path="{ENV_REGEX_NS}/Robot/.*",
         history_length=3,
         track_air_time=True,
     )
