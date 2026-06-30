@@ -1,88 +1,65 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# One-shot cloud instance setup for quadruped RL training.
-# Tested on RunPod PyTorch 2.8.0 (Ubuntu 24.04, CUDA 12.8).
+# One-shot setup for quadruped RL training on RunPod.
 #
-# Run once on a fresh cloud instance:
-#   bash scripts/cloud_setup.sh
+# PREREQUISITE: start a RunPod pod using the container image
+#   nvcr.io/nvidia/isaac-lab:2.3.2
+# (NOT the raw Isaac Sim image — the isaac-lab image has compatible physx.fabric)
+#
+# Then SSH into the pod and run:
+#   cd /workspace && git clone <your-repo-url> Quadruped
+#   cd Quadruped && bash scripts/cloud_setup.sh
 #
 # What it does:
-#   1. Installs Miniconda
-#   2. Creates 'isaaclab' conda env (Python 3.10)
-#   3. Clones Isaac Lab → ~/IsaacLab
-#   4. Installs Isaac Sim 4.5 + Isaac Lab extensions
-#   5. Generates the URDF
-#   6. Converts URDF → USD
-#   7. Prints the training command
+#   1. Clones Isaac Lab main → /workspace/isaaclab  (skips if already present)
+#   2. Links /isaac-sim into the Isaac Lab tree
+#   3. Installs Isaac Lab Python extensions into the Kit Python
+#   4. Generates the URDF
+#   5. Converts URDF → USD
+#   6. Prints the training command
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ISAACLAB_PATH="$HOME/IsaacLab"
+ISAACLAB_PATH="${ISAACLAB_PATH:-/workspace/isaaclab}"
 
 echo "════════════════════════════════════════════════════════"
-echo " Quadruped cloud setup"
-echo " Repo   : $REPO_ROOT"
-echo " Isaac  : $ISAACLAB_PATH"
+echo " Quadruped cloud setup  (isaac-lab:2.3.2 container)"
+echo " Repo    : $REPO_ROOT"
+echo " IsaacLab: $ISAACLAB_PATH"
 echo "════════════════════════════════════════════════════════"
 
-# ── 1. Miniconda ──────────────────────────────────────────────────────────────
-# Source conda if already installed but not yet in PATH (common after first install)
-if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
-  source "$HOME/miniconda3/etc/profile.d/conda.sh"
-fi
-
-if ! command -v conda &>/dev/null; then
-  echo "[1/6] Installing Miniconda..."
-  wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
-  bash /tmp/miniconda.sh -b -p "$HOME/miniconda3"
-  rm /tmp/miniconda.sh
-  source "$HOME/miniconda3/etc/profile.d/conda.sh"
-  conda init bash
+# ── 1. Clone Isaac Lab ────────────────────────────────────────────────────────
+if [ -d "$ISAACLAB_PATH/.git" ]; then
+  echo "[1/4] Isaac Lab already cloned — skipping"
 else
-  echo "[1/6] Miniconda already installed — skipping"
-fi
-
-# Accept Anaconda ToS non-interactively (required since Anaconda policy update 2024)
-conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
-conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
-
-# ── 2. Conda env ──────────────────────────────────────────────────────────────
-if conda env list | grep -qw "isaaclab"; then
-  echo "[2/6] Conda env 'isaaclab' already exists — skipping"
-else
-  echo "[2/6] Creating conda env (Python 3.10)..."
-  conda create -y -n isaaclab python=3.10
-fi
-conda activate isaaclab
-
-# ── 3. Clone Isaac Lab ────────────────────────────────────────────────────────
-if [ -d "$ISAACLAB_PATH" ]; then
-  echo "[3/6] Isaac Lab already cloned — skipping"
-else
-  echo "[3/6] Cloning Isaac Lab..."
+  echo "[1/4] Cloning Isaac Lab (main)..."
   git clone https://github.com/isaac-sim/IsaacLab.git "$ISAACLAB_PATH"
 fi
 
-# ── 4. Install Isaac Sim + Isaac Lab ─────────────────────────────────────────
-if python -c "import isaacsim" &>/dev/null; then
-  echo "[4/6] Isaac Sim already installed — skipping"
+# ── 2. Link /isaac-sim into the Isaac Lab tree ───────────────────────────────
+# The container ships Isaac Sim at /isaac-sim; Isaac Lab expects it at
+# <isaaclab>/_isaac_sim.  A symlink is all that's needed.
+if [ -e "$ISAACLAB_PATH/_isaac_sim" ]; then
+  echo "[2/4] _isaac_sim symlink already exists — skipping"
 else
-  echo "[4/6] Installing Isaac Sim 4.5.0 (~20 GB download, ~20 min)..."
-  pip install "isaacsim[all]==4.5.0.0" --extra-index-url https://pypi.nvidia.com
-  echo "[4/6] Installing Isaac Lab extensions..."
-  cd "$ISAACLAB_PATH" && ./isaaclab.sh --install
-  conda activate isaaclab
+  echo "[2/4] Linking /isaac-sim → $ISAACLAB_PATH/_isaac_sim"
+  ln -s /isaac-sim "$ISAACLAB_PATH/_isaac_sim"
 fi
 
-# ── 5. Generate URDF ──────────────────────────────────────────────────────────
-echo "[5/6] Generating URDF..."
-cd "$REPO_ROOT"
-python scripts/generate_urdf.py
+# ── 3. Install Isaac Lab extensions into the Kit Python ──────────────────────
+echo "[3/4] Installing Isaac Lab extensions (uses Kit Python, ~5 min)..."
+cd "$ISAACLAB_PATH"
+./isaaclab.sh --install
 
-# ── 6. Convert URDF → USD ─────────────────────────────────────────────────────
-echo "[6/6] Converting URDF → USD (Isaac Sim starts headless, ~3 min)..."
-export ISAACLAB_PATH="$ISAACLAB_PATH"
+# ── 4. Generate URDF + convert to USD ────────────────────────────────────────
+cd "$REPO_ROOT"
+
+echo "[4/4a] Generating URDF..."
+"$ISAACLAB_PATH/_isaac_sim/python.sh" scripts/generate_urdf.py
+
+echo "[4/4b] Converting URDF → USD (Isaac Sim starts headless, ~3 min)..."
+export ISAACLAB_PATH
 bash scripts/convert_to_usd.sh
 
 # ── Done ──────────────────────────────────────────────────────────────────────
@@ -90,11 +67,11 @@ echo ""
 echo "════════════════════════════════════════════════════════"
 echo " Setup complete!"
 echo ""
-echo " Start training (with livestream viewport):"
-echo "   ~/IsaacLab/isaaclab.sh -p scripts/train_rl.py \\"
+echo " Start training:"
+echo "   cd $REPO_ROOT"
+echo "   $ISAACLAB_PATH/isaaclab.sh -p scripts/train_rl.py \\"
 echo "     --num_envs 2048 --livestream 1"
 echo ""
-echo " Then on your LOCAL machine, open an SSH tunnel:"
-echo "   ssh root@213.192.2.68 -p 40177 -i ~/.ssh/id_ed25519 -L 49100:localhost:49100"
-echo " And open: http://localhost:49100/streaming/client"
+echo " Visualise (RunPod HTTP proxy — no SSH tunnel needed):"
+echo "   https://<pod-id>-49100.proxy.runpod.net/streaming/client"
 echo "════════════════════════════════════════════════════════"

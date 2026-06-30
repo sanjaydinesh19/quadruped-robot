@@ -76,12 +76,18 @@ log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "rsl_
 os.makedirs(log_dir, exist_ok=True)
 
 runner_cfg_dict = runner_cfg.to_dict()
-# rsl_rl 5.x removed 'stochastic' from MLPModel.__init__() but isaaclab_rl's
-# RslRlMLPModelCfg still emits it for backward compat. Strip it before handing
-# the dict to the runner so we don't get an unexpected-kwarg TypeError.
+# isaaclab_rl's RslRlMLPModelCfg emits backward-compat fields ('stochastic',
+# 'init_noise_std', ...) for old rsl_rl versions, but the Kit Python's
+# MLPModel.__init__() only accepts the four kwargs below.  Whitelist them so
+# we never hit an unexpected-keyword-argument TypeError regardless of which
+# legacy fields the config emits.
+_VALID_MLP_KWARGS = {"class_name", "hidden_dims", "activation", "obs_normalization", "distribution_cfg"}
 for _model_key in ("actor", "critic"):
     if isinstance(runner_cfg_dict.get(_model_key), dict):
-        runner_cfg_dict[_model_key].pop("stochastic", None)
+        runner_cfg_dict[_model_key] = {
+            k: v for k, v in runner_cfg_dict[_model_key].items()
+            if k in _VALID_MLP_KWARGS
+        }
 
 runner = OnPolicyRunner(
     env,

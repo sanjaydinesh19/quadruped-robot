@@ -23,6 +23,12 @@ ISAACLAB="$ISAACLAB_PATH/isaaclab.sh"
 
 URDF="$REPO_ROOT/src/ros2/quadruped_description/urdf/quadruped.urdf"
 OUTPUT_DIR="$REPO_ROOT/assets/quadruped"
+# convert_urdf.py treats its second argument as a BASE NAME (stem), not a
+# directory.  Passing $OUTPUT_DIR alone would produce assets/quadruped.usd at
+# the wrong level.  Append /quadruped so the tool writes:
+#   assets/quadruped/quadruped.usd          ← meta-USD (references payloads)
+#   assets/quadruped/configuration/*.usd    ← actual geometry/physics data
+OUTPUT_BASE="$OUTPUT_DIR/quadruped"
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 if [ ! -f "$ISAACLAB" ]; then
@@ -49,7 +55,7 @@ echo "[convert_to_usd] Running Isaac Lab URDF importer (headless)..."
 #   (Isaac Lab 4.5 renamed --merge-fixed-joints → --merge-joints)
 "$ISAACLAB" -p "$ISAACLAB_PATH/scripts/tools/convert_urdf.py" \
   "$URDF" \
-  "$OUTPUT_DIR" \
+  "$OUTPUT_BASE" \
   --merge-joints \
   --headless
 
