@@ -83,9 +83,7 @@ class LegKinematics:
         r_yz = np.sqrt(y_rel**2 + z**2)  # reach in the yz plane
         q0 = np.arctan2(-y_rel, -z)      # hip abduction
 
-        # Project onto sagittal plane (x-z' after abduction)
-        z_prime = -np.sqrt(max(r_yz**2 - (sign * self.l_hip - y_hip_proj := sign * self.l_hip * (r_yz / r_yz))**2, r_yz**2))
-        # Simpler: distance from hip joint to foot in sagittal plane
+        # Distance from hip joint to foot projected into the sagittal plane
         r_sag = np.sqrt(x**2 + r_yz**2)
 
         reach_max = self.l_thigh + self.l_shin
@@ -102,10 +100,14 @@ class LegKinematics:
         q2 = -np.arccos(cos_q2)  # knee bends backward → negative
 
         # --- Thigh angle ---
-        alpha = np.arctan2(x, -np.sqrt(max(r_yz**2, 0)))
+        # Standard 2-link planar IK in the sagittal plane.
+        # alpha: angle from downward vertical to the foot target.
+        # r_yz == |z_chain| is the downward distance after abduction (always > 0).
+        # beta: angular contribution from the knee bend.
+        alpha = np.arctan2(x, r_yz)
         beta = np.arctan2(
-            self.l_shin * np.sin(-q2),
-            self.l_thigh + self.l_shin * np.cos(-q2),
+            self.l_shin * np.sin(q2),
+            self.l_thigh + self.l_shin * np.cos(q2),
         )
         q1 = alpha - beta
 

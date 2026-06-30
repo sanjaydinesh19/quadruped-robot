@@ -1,0 +1,72 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Quadruped robot — single source of truth for all physical parameters.
+# Edit this file, then re-run:  python scripts/generate_urdf.py
+# ──────────────────────────────────────────────────────────────────────────────
+
+robot:
+  name: quadruped
+
+# ── Body (torso) ──────────────────────────────────────────────────────────────
+body:
+  mass_kg: 3.300          # torso mass (excludes leg motors/links)
+  length_m: 0.400         # front-to-back (x axis)
+  width_m:  0.200         # side-to-side  (y axis)
+  height_m: 0.080         # top-to-bottom (z axis)
+  # Inertia is computed from geometry by generate_urdf.py — no need to set here.
+
+# ── Hip joint placement (relative to body centre) ────────────────────────────
+# The four hip joints sit at the corners of the body:
+#   FL/FR: x = +hip_x_offset_m    RL/RR: x = −hip_x_offset_m
+#   FL/RL: y = +hip_y_offset_m    FR/RR: y = −hip_y_offset_m
+hip_x_offset_m: 0.183    # distance along x from body centre to hip joint
+hip_y_offset_m: 0.100    # distance along y from body centreline to hip joint
+                          # (should equal body_width/2 — hip sits at body edge)
+
+# ── Per-leg geometry ──────────────────────────────────────────────────────────
+# Joint numbering:  hip=0 (abduction), thigh=1 (flexion), knee=2 (flexion)
+# Matches src/kinematics/leg.py
+legs:
+  l_hip_m:   0.062        # hip abduction link: hip joint → thigh joint (lateral)
+  l_thigh_m: 0.209        # thigh link: thigh joint → knee joint
+  l_shin_m:  0.195        # shin link:  knee joint → foot contact point
+
+  # Visual/collision geometry (simple primitives — replace with meshes later)
+  hip_radius_m:   0.030
+  thigh_radius_m: 0.022
+  shin_radius_m:  0.016
+  foot_radius_m:  0.020   # contact sphere at foot tip
+
+  # Link masses (kg) — distribute remaining ~1.7 kg across 12 links + 4 feet
+  hip_mass_kg:   0.200    # includes QDD motor housing
+  thigh_mass_kg: 0.150    # thigh structural link
+  shin_mass_kg:  0.075    # shin structural link
+  foot_mass_kg:  0.025    # contact sphere (rubber tip)
+
+# ── Joint limits ──────────────────────────────────────────────────────────────
+# Convention matches leg.py:
+#   q0 (hip/abduction) : positive = adduction (leg moves inward)
+#   q1 (thigh/flexion) : positive = forward swing
+#   q2 (knee/flexion)  : always negative (knee bends rearward)
+joint_limits:
+  hip_abduction:
+    lower_rad: -0.698     # −40° (leg kicked outward)
+    upper_rad:  0.698     # +40° (leg pulled inward)
+    velocity_rads: 20.0
+    effort_nm:     10.0
+
+  thigh:
+    lower_rad: -1.047     # −60° (leg swept backward)
+    upper_rad:  1.222     # +70° (leg swept forward)
+    velocity_rads: 20.0
+    effort_nm:     20.0
+
+  knee:
+    lower_rad: -2.618     # −150° (highly bent)
+    upper_rad: -0.524     # −30°  (nearly straight)
+    velocity_rads: 20.0
+    effort_nm:     20.0
+
+# ── Actuator dynamics (for simulation) ───────────────────────────────────────
+actuator:
+  damping:  0.10          # joint viscous damping (N·m·s/rad)
+  friction: 0.00          # Coulomb friction (N·m) — tune after hardware testing
