@@ -27,6 +27,11 @@ echo " Isaac  : $ISAACLAB_PATH"
 echo "════════════════════════════════════════════════════════"
 
 # ── 1. Miniconda ──────────────────────────────────────────────────────────────
+# Source conda if already installed but not yet in PATH (common after first install)
+if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+  source "$HOME/miniconda3/etc/profile.d/conda.sh"
+fi
+
 if ! command -v conda &>/dev/null; then
   echo "[1/6] Installing Miniconda..."
   wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
@@ -36,8 +41,11 @@ if ! command -v conda &>/dev/null; then
   conda init bash
 else
   echo "[1/6] Miniconda already installed — skipping"
-  source "$(conda info --base)/etc/profile.d/conda.sh"
 fi
+
+# Accept Anaconda ToS non-interactively (required since Anaconda policy update 2024)
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
 
 # ── 2. Conda env ──────────────────────────────────────────────────────────────
 if conda env list | grep -qw "isaaclab"; then
