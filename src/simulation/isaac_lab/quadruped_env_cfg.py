@@ -24,7 +24,9 @@ Obs (48-dim)
 
 Actions (12-dim)
 ----------------
-  joint position offsets from the default standing pose, clipped to ±0.5 rad.
+  joint position offsets from the default standing pose, clipped to ±0.25 rad
+  (matches A1/Go1-class action scaling — see ActionsCfg for why this is
+  narrower than isaaclab's ANYmal default of 0.5).
   Isaac Lab's ImplicitActuator converts these targets to torques via PD control.
 """
 from __future__ import annotations
@@ -117,8 +119,19 @@ class QuadrupedSceneCfg(InteractiveSceneCfg):
         actuators={
             # QDD motors modelled as implicit PD controllers.
             # Kp=25 N·m/rad, Kd=0.5 N·m·s/rad is typical for lightweight QDD legs.
+            # Split into two groups so hip effort_limit matches the 10 N·m in
+            # config/robot_params.yaml — a single shared group previously gave
+            # hips the same 20 N·m as thigh/knee, silently overriding the URDF's
+            # per-joint limits (harmless for training, but wrong for sim-to-real).
+            "hips": ImplicitActuatorCfg(
+                joint_names_expr=[".*_hip_joint"],
+                effort_limit=10.0,
+                velocity_limit=20.0,
+                stiffness=25.0,
+                damping=0.5,
+            ),
             "legs": ImplicitActuatorCfg(
-                joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_knee_joint"],
+                joint_names_expr=[".*_thigh_joint", ".*_knee_joint"],
                 effort_limit=20.0,
                 velocity_limit=20.0,
                 stiffness=25.0,
@@ -190,7 +203,13 @@ class ActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=[".*_hip_joint", ".*_thigh_joint", ".*_knee_joint"],
-        scale=0.5,           # NN output ∈ [−1,+1] → joint offset ∈ [−0.5, +0.5] rad
+        # 0.25 matches A1/Go1/Walk-These-Ways action scaling for lighter (~12kg
+        # and under) quadrupeds, rather than isaaclab's ANYmal-derived default
+        # of 0.5 (ANYmal is ~30kg+ and moves proportionally slower). A smaller
+        # per-step offset window also means early random exploration produces
+        # less violent, less fall-prone motion — relevant since this robot's
+        # policy currently prefers standing still over risking a fall.
+        scale=0.25,          # NN output ∈ [−1,+1] → joint offset ∈ [−0.25, +0.25] rad
         use_default_offset=True,
     )
 
@@ -231,17 +250,39 @@ class RewardsCfg:
 
     Weights are tuned for a ~5 kg robot. Scale all weights together if
     the reward is too noisy to converge.
+
+    IMPORTANT — this RewardManager only computes the per-step task/shaping
+    terms below. Every proven reference implementation (ETH legged_gym,
+    Isaac Lab's own ANYmal/A1/Go1 configs) additionally clips the summed
+    per-step reward to >= 0 before adding a large, uncapped penalty for a
+    real fall on top ("only_positive_rewards" in legged_gym). Isaac Lab's
+    manager-based RewardManager has no built-in equivalent, so that floor is
+    applied separately by RewardShapingWrapper in train_rl.py, not here.
+    Without it, an imperfect early walking attempt can accumulate more
+    negative reward per step (from the stability penalties below) than
+    standing rigidly still ever would — which is the literature-documented
+    mechanism behind this policy's observed "learn not to fall, then never
+    progress to walking" plateau.
     """
 
     # ── Primary: velocity tracking ────────────────────────────────────────────
+    # 1.5 / 0.75 (Unitree Go2's ratio in Isaac Lab, vs. the generic ANYmal/
+    # legged_gym 1.0/0.5) — raised because TensorBoard showed the policy
+    # settling into a "stand still, don't fall" local optimum: episode length
+    # and reward both jumped hard at iteration ~800 and then plateaued flat
+    # through iteration 1800 with no further movement. That pattern is a
+    # documented failure mode (see feet_air_time/feet_slide comments below and
+    # RewardsCfg docstring) where standing still is never clearly worse than
+    # an imperfect walking attempt. Raising the tracking reward's weight
+    # relative to the stability penalties widens that gap.
     track_lin_vel_xy_exp = RewardTermCfg(
         func=mdp.track_lin_vel_xy_exp,
-        weight=1.0,
+        weight=1.5,
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
     )
     track_ang_vel_z_exp = RewardTermCfg(
         func=mdp.track_ang_vel_z_exp,
-        weight=0.5,
+        weight=0.75,
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
     )
 
@@ -279,13 +320,24 @@ class RewardsCfg:
         params={"command_name": "base_velocity"},
     )
     # Reward feet spending time in the air — the actual signal for "step, don't slide".
+    # weight 0.5 (ANYmal-flat's value; legged_gym's own base config uses 1.0)
+    # rather than the generic isaaclab default of 0.125 — this term needs to
+    # compete with the stability penalties, not just nudge them.
+    # threshold 0.3s (down from 0.4s): this robot's legs are much shorter than
+    # ANYmal's (0.4m thigh+shin vs ANYmal's ~0.55m), so a natural step cadence
+    # is faster and a shorter threshold matches its actual stride timing. Note
+    # the formula (last_air_time - threshold) * first_contact is negative for
+    # any footfall shorter than the threshold — a real behavior of this exact
+    # formula in every reference implementation, not a bug — which is another
+    # reason the RewardShapingWrapper floor in train_rl.py matters: it stops
+    # a few punished tentative steps from ever outweighing standing still.
     feet_air_time = RewardTermCfg(
         func=gait_mdp.feet_air_time,
-        weight=0.25,
+        weight=0.5,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_shin_link"),
-            "threshold": 0.4,
+            "threshold": 0.3,
         },
     )
     # Penalise a planted foot sliding — this is the direct fix for the gliding exploit.
@@ -365,6 +417,19 @@ class EventCfg:
             "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
             "mass_distribution_params": (-0.5, 0.5),
             "operation": "add",
+        },
+    )
+
+    # Randomise base COM offset — present in isaaclab's own ANYmal config
+    # (±0.05m xy / ±0.01m z) but was missing here. A real robot's COM never
+    # sits exactly at the URDF-nominal point once wiring/battery/sensors are
+    # added, so this closes a real sim-to-real gap.
+    randomize_base_com = EventTermCfg(
+        func=mdp.randomize_rigid_body_com,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
+            "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.01, 0.01)},
         },
     )
 
