@@ -27,6 +27,12 @@ devel/
 *.bak
 _output/
 
+# UrdfConverter output (regenerate with scripts/convert_to_usd.sh) — the
+# metadata files embed the local absolute source path, so they're
+# machine-specific, not portable.
+assets/quadruped/*
+!assets/quadruped/.gitkeep
+
 # Gazebo
 *.world.bak
 
@@ -51,3 +57,6 @@ mcp_server/__pycache__/
 # Logs
 *.log
 logs/
+
+# Rendered preview images (scripts/render_robot_preview.py output)
+renders/

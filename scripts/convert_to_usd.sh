@@ -53,7 +53,15 @@ echo "[convert_to_usd] Running Isaac Lab URDF importer (headless)..."
 # --merge-joints: fuses the four fixed foot joints into their shin links,
 #   reducing articulation complexity without losing collision geometry.
 #   (Isaac Lab 4.5 renamed --merge-fixed-joints → --merge-joints)
-"$ISAACLAB" -p "$ISAACLAB_PATH/scripts/tools/convert_urdf.py" \
+#
+# Uses scripts/isaac_urdf_convert.py instead of IsaacLab's own
+# scripts/tools/convert_urdf.py: on this Isaac Sim 4.5 install, the headless
+# kit experience file doesn't declare the URDF importer extension as a
+# dependency (only the GUI one does), so the stock tool fails immediately
+# with ModuleNotFoundError under --headless. Running it without --headless
+# instead segfaults on this GPU's 4 GB VRAM trying to open a viewport. See
+# isaac_urdf_convert.py's docstring for the full explanation.
+"$ISAACLAB" -p "$REPO_ROOT/scripts/isaac_urdf_convert.py" \
   "$URDF" \
   "$OUTPUT_BASE" \
   --merge-joints \
