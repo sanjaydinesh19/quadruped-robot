@@ -59,6 +59,7 @@ import src.simulation.isaac_lab  # noqa: F401 — triggers gym.register side-eff
 
 from src.simulation.isaac_lab.quadruped_env_cfg import QuadrupedFlatEnvCfg
 from src.simulation.isaac_lab.agents.rsl_rl_ppo_cfg import QuadrupedPPORunnerCfg
+from src.simulation.isaac_lab.rsl_rl_adapter import build_runner_cfg_dict
 
 # ── Step 3: build environment ─────────────────────────────────────────────────
 env_cfg = QuadrupedFlatEnvCfg()
@@ -75,34 +76,7 @@ if args_cli.max_iterations is not None:
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "rsl_rl")
 os.makedirs(log_dir, exist_ok=True)
 
-runner_cfg_dict = runner_cfg.to_dict()
-
-# ── API adapter: new isaaclab_rl uses actor/critic split; the container's
-#    rsl_rl runner reads a single "policy" key (ActorCritic).
-#    Build it from our actor/critic configs so both API shapes are present.
-_actor = runner_cfg_dict.get("actor") or {}
-_critic = runner_cfg_dict.get("critic") or {}
-_dist = _actor.get("distribution_cfg") or {}
-runner_cfg_dict["policy"] = {
-    "class_name": "ActorCritic",
-    "actor_hidden_dims":  _actor.get("hidden_dims", [512, 256, 128]),
-    "critic_hidden_dims": _critic.get("hidden_dims", [512, 256, 128]),
-    "activation":         _actor.get("activation", "elu"),
-    "init_noise_std": (_dist.get("init_std") if isinstance(_dist, dict) else 1.0) or 1.0,
-}
-
-# ── Strip fields from the algorithm dict that the container's PPO doesn't accept.
-_VALID_ALG_KWARGS = {
-    "class_name", "num_learning_epochs", "num_mini_batches", "learning_rate",
-    "schedule", "gamma", "lam", "entropy_coef", "desired_kl", "max_grad_norm",
-    "value_loss_coef", "use_clipped_value_loss", "clip_param",
-    "normalize_advantage_per_mini_batch",
-}
-if isinstance(runner_cfg_dict.get("algorithm"), dict):
-    runner_cfg_dict["algorithm"] = {
-        k: v for k, v in runner_cfg_dict["algorithm"].items()
-        if k in _VALID_ALG_KWARGS
-    }
+runner_cfg_dict = build_runner_cfg_dict(runner_cfg)
 
 print(f"[train_rl] policy cfg:    {runner_cfg_dict['policy']}")
 print(f"[train_rl] algorithm cfg: {runner_cfg_dict['algorithm']}")

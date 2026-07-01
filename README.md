@@ -51,7 +51,8 @@ scripts/
   convert_to_usd.sh          # URDF → USD for Isaac Lab
   cloud_setup.sh             # one-shot RunPod container setup
   train_rl.py                # PPO training entry point
-  play_rl.py                 # load checkpoint + run policy in viewer
+  play_rl.py                 # load checkpoint + run policy in viewer, or record a video
+  watch_rl.py                # live MJPEG stream of the newest checkpoint (see below)
 
 tests/
   unit/                      # pytest unit tests (no simulator required)
@@ -108,7 +109,34 @@ Access at `https://<pod-id>-6006.proxy.runpod.net`.
   --num_envs 2048 --headless --resume
 ```
 
-### 6. Record and download a policy video
+### 6. Watch the policy live (recommended over recording per checkpoint)
+
+Isaac Sim's native livestream needs a UDP media channel, and RunPod pods don't
+forward UDP — the standard WebRTC livestream path will not connect on a
+RunPod pod, no matter how the ports are configured. `scripts/watch_rl.py`
+sidesteps that: it runs a 1-env rollout alongside training, auto-reloads the
+newest checkpoint every 30 s, and streams frames as MJPEG over plain HTTP —
+TCP only, so it works through the same port-proxy mechanism as TensorBoard.
+
+In a third SSH session (alongside training and TensorBoard):
+
+```bash
+/workspace/isaaclab/isaaclab.sh -p scripts/watch_rl.py \
+  --headless --enable_cameras --port 6007
+```
+
+Expose port `6007` the same way you exposed `6006` for TensorBoard, then open:
+
+```
+https://<pod-id>-6007.proxy.runpod.net/
+```
+
+The page shows the live rollout and jumps to each new checkpoint automatically
+as training saves it — no manual record/rename/serve/download cycle needed.
+
+### 7. Record and download a policy video
+
+Still useful for saving a specific checkpoint's run rather than just watching live.
 
 **Record** (replace `model_2800.pt` with any checkpoint):
 
@@ -191,7 +219,10 @@ Use the joint slider GUI to manually drive all 12 joints.
 | Parallel envs | 32 (local) / 2048 (cloud RTX 3090) |
 
 **Reward shaping:** primary objective is tracking commanded (vx, vy, ωz) velocity.
-Penalties discourage bouncing, high energy use, shin/thigh ground contacts, and falling.
+Penalties discourage bouncing, high energy use, thigh ground contacts, and falling.
+`feet_air_time` rewards actual stepping and `feet_slide` penalises a planted foot
+sliding — vendored in `src/simulation/isaac_lab/mdp/` since isaaclab 2.3.x's core
+`mdp` module doesn't ship them (they're locomotion-task-specific upstream).
 
 **Domain randomisation:** floor friction, base mass ±0.5 kg, random episode reset,
 random pushes every 10–15 s.
