@@ -30,6 +30,32 @@ from RViz2 (`ros2 launch quadruped_description display.launch.py`).
 | Depth sensor | Intel RealSense D435i |
 | Foot contact | FSR sensors ×4 |
 
+## Hardware Components & Estimated Budget (INR)
+
+Rough, budget-conscious hobbyist-market estimates for a physical build — not vendor
+quotes. Actual prices vary by supplier and import duties; treat this as a planning
+range, not a BOM to check out with.
+
+| Component | Qty | Est. Unit Price | Est. Subtotal | Notes |
+|---|---|---|---|---|
+| QDD actuator — hip (10 N·m): BLDC gimbal motor + AS5048A magnetic encoder + SimpleFOC-class driver | 4 | ₹1,800 | ₹7,200 | DIY closed-loop QDD, not a geared servo |
+| QDD actuator — thigh/knee (20 N·m): larger BLDC motor + encoder + driver | 8 | ₹2,600 | ₹20,800 | Higher torque needs a bigger stator |
+| Raspberry Pi 5 (8 GB) | 1 | ₹8,500 | ₹8,500 | High-level compute |
+| Teensy 4.1 | 1 | ₹3,500 | ₹3,500 | Real-time joint control @ 1 kHz |
+| IMU (BNO055, 9-DOF w/ onboard fusion) | 1 | ₹1,800 | ₹1,800 | Base orientation/angular velocity |
+| FSR foot sensors | 4 | ₹300 | ₹1,200 | Foot contact sensing |
+| Intel RealSense D435i | 1 | ₹28,000 | ₹28,000 | Optional for initial bring-up — see below |
+| LiPo battery (4S, ~5000 mAh) | 1 | ₹3,500 | ₹3,500 | Sized for a ~5 kg robot |
+| BMS + power distribution + 5V/3.3V regulators | 1 | ₹1,500 | ₹1,500 | |
+| 3D-printed frame (filament) + fasteners/bearings | 1 | ₹4,000 | ₹4,000 | PETG/nylon recommended over PLA |
+| Wiring, connectors, misc electronics | 1 | ₹1,500 | ₹1,500 | XT60/JST, heat shrink, standoffs |
+| **Total** | | | **≈ ₹81,500** | |
+
+**Keeping it cheap:**
+- The RealSense D435i is by far the single biggest line item (~34% of the total) and isn't needed for basic locomotion bring-up — this project is proprioceptive-only in sim (see RL Environment below), so the depth camera only matters once perception/navigation work starts. Deferring it drops the build to **≈ ₹53,500**.
+- The DIY gimbal-motor + encoder + driver route above is roughly 5-10x cheaper per joint than commercial QDD actuators (e.g. MyActuator RMD-X-class units run ₹15,000-30,000 *each*, which would put just the 12 actuators at ₹1.8-3.6 lakh) — at the cost of more assembly/tuning work.
+- Printing the frame at home instead of using a print service is most of the savings in that line; a print farm/service would add ₹3,000-6,000.
+
 ## Stack
 
 | Layer | Tool |
