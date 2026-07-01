@@ -288,7 +288,12 @@ class RewardsCfg:
 
     # ── Stability penalties ───────────────────────────────────────────────────
     lin_vel_z_l2 = RewardTermCfg(func=mdp.lin_vel_z_l2, weight=-2.0)
-    ang_vel_xy_l2 = RewardTermCfg(func=mdp.ang_vel_xy_l2, weight=-0.2)
+    # -0.2 -> -0.4: at iteration ~700 this term plateaued around -4 (Episode_Reward)
+    # instead of improving alongside flat_orientation_l2's recovery — the policy
+    # keeps the body level through fast roll/pitch rotation (visible as "flailing"
+    # in checkpoint videos) rather than smooth weight-shifting. Doubling the
+    # weight raises the cost of achieving orientation via wobble specifically.
+    ang_vel_xy_l2 = RewardTermCfg(func=mdp.ang_vel_xy_l2, weight=-0.4)
     # Increased from -2.0: robot was pitching forward to exploit velocity reward.
     flat_orientation_l2 = RewardTermCfg(func=mdp.flat_orientation_l2, weight=-5.0)
     # Penalise crouching — body centre should stay near nominal 0.32 m standing height.
@@ -300,16 +305,31 @@ class RewardsCfg:
 
     # ── Joint health penalties ────────────────────────────────────────────────
     joint_pos_limits = RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0)
+    # soft_ratio 0.9 -> 0.82: Episode_Reward/joint_vel_limits was still diving
+    # (-4 and worsening) at iteration ~700 with no inflection — joints were
+    # cruising close to the limit for long stretches before the penalty ever
+    # engaged. Tightening the soft ratio starts charging for it earlier.
     joint_vel_limits = RewardTermCfg(
         func=mdp.joint_vel_limits,
         weight=-1.0,
-        params={"soft_ratio": 0.9},
+        params={"soft_ratio": 0.82},
     )
     joint_torques_l2 = RewardTermCfg(
         func=mdp.joint_torques_l2, weight=-1.0e-5
     )
-    joint_acc_l2 = RewardTermCfg(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate_l2 = RewardTermCfg(func=mdp.action_rate_l2, weight=-0.01)
+    # -2.5e-7 -> -7.5e-7 (3x): Episode_Reward/joint_acc_l2 was still diving
+    # linearly at iteration ~700 (-2.6 and worsening) — same escalating-jerk
+    # pattern as action_rate_l2 below, not yet strong enough to counter it.
+    joint_acc_l2 = RewardTermCfg(func=mdp.joint_acc_l2, weight=-7.5e-7)
+    # -0.01 -> -0.025: the largest-magnitude cost term in the whole reward
+    # (-6.76 at iteration ~700) and still diving steeply with no sign of
+    # leveling off — the policy is achieving its "stay upright, stay level"
+    # equilibrium via increasingly violent step-to-step action changes
+    # instead of a coordinated gait, and mean_reward has been flat near 0
+    # for 500+ iterations while this kept getting worse. Raising this
+    # (along with joint_acc_l2 and ang_vel_xy_l2 above) directly taxes the
+    # thrashing rather than the visible symptom of it.
+    action_rate_l2 = RewardTermCfg(func=mdp.action_rate_l2, weight=-0.025)
 
     # ── Gait quality ──────────────────────────────────────────────────────────
     # Only penalise joint deviation while (near-)stationary — applied unconditionally
