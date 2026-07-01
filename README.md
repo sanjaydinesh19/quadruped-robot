@@ -3,6 +3,20 @@
 A 5 kg, 12-DOF quadruped robot built simulation-first using NVIDIA Isaac Lab.
 The goal is full RL-trained locomotion in simulation before any hardware is touched.
 
+## Design
+
+The visual design layers cosmetic-only detail (chassis panels, vents, front camera
+housing, roof-mounted lidar puck, carry handle, per-joint QDD pancake motor
+housings, accent trim) onto the structural links, without touching any
+`<collision>`/`<inertial>` geometry or the joint graph — kinematics, mass
+distribution, and RL training behaviour are unaffected. Screenshots below are
+from RViz2 (`ros2 launch quadruped_description display.launch.py`).
+
+| | | |
+|---|---|---|
+| ![Relaxed stance, joint frames visible](docs/images/quadruped-1.png) | ![Chassis detail — panels, vents, camera, handle](docs/images/quadruped-2.png) | ![Standing pose — full 12-DOF leg kinematics](docs/images/quadruped-3.png) |
+| Relaxed stance, joint frames visible | Chassis detail — panels, vents, camera, handle | Standing pose — full 12-DOF leg kinematics |
+
 ## Robot Specification
 
 | Parameter | Value |
