@@ -92,22 +92,33 @@ def _inertial(
     )
 
 
-def _material(parent: ET.Element, rgba: tuple) -> None:
-    mat = ET.SubElement(parent, "material", name="")
-    ET.SubElement(mat, "color", rgba=f"{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}")
+def _material_ref(parent: ET.Element, name: str) -> None:
+    """Reference a named <material> declared once at the robot root (see
+    _add_material_library). Avoids repeating the same rgba on every one of
+    the many cosmetic visuals attached to a link."""
+    ET.SubElement(parent, "material", name=name)
+
+
+def _add_material_library(
+    root: ET.Element, materials: dict[str, tuple[float, float, float, float]]
+) -> None:
+    for name, rgba in materials.items():
+        mat = ET.SubElement(root, "material", name=name)
+        ET.SubElement(mat, "color", rgba=f"{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}")
 
 
 def _visual_box(
     parent: ET.Element,
     size: tuple,
     xyz: tuple = (0.0, 0.0, 0.0),
-    rgba: tuple = (0.3, 0.3, 0.8, 1.0),
+    rpy: tuple = (0.0, 0.0, 0.0),
+    material: str = "structural_grey",
 ) -> None:
     vis = ET.SubElement(parent, "visual")
-    _origin(vis, xyz)
+    _origin(vis, xyz, rpy)
     ET.SubElement(ET.SubElement(vis, "geometry"), "box",
                   size=_fmt3(*size))
-    _material(vis, rgba)
+    _material_ref(vis, material)
 
 
 def _visual_cylinder(
@@ -116,26 +127,26 @@ def _visual_cylinder(
     length: float,
     xyz: tuple = (0.0, 0.0, 0.0),
     rpy: tuple = (0.0, 0.0, 0.0),
-    rgba: tuple = (0.8, 0.5, 0.1, 1.0),
+    material: str = "structural_grey",
 ) -> None:
     vis = ET.SubElement(parent, "visual")
     _origin(vis, xyz, rpy)
     geom = ET.SubElement(vis, "geometry")
     ET.SubElement(geom, "cylinder", radius=f"{radius:.6f}", length=f"{length:.6f}")
-    _material(vis, rgba)
+    _material_ref(vis, material)
 
 
 def _visual_sphere(
     parent: ET.Element,
     radius: float,
     xyz: tuple = (0.0, 0.0, 0.0),
-    rgba: tuple = (0.9, 0.2, 0.1, 1.0),
+    material: str = "rubber_black",
 ) -> None:
     vis = ET.SubElement(parent, "visual")
     _origin(vis, xyz)
     ET.SubElement(ET.SubElement(vis, "geometry"), "sphere",
                   radius=f"{radius:.6f}")
-    _material(vis, rgba)
+    _material_ref(vis, material)
 
 
 def _collision_box(
@@ -169,6 +180,65 @@ def _collision_sphere(
                   radius=f"{radius:.6f}")
 
 
+# ── Cosmetic-only geometry ─────────────────────────────────────────────────────
+# Everything in this section emits <visual>-only elements: no <collision>, no
+# <inertial>, no new <link> or <joint>. It cannot change contact detection,
+# total mass, centre of mass, inertia, or the articulation graph — Isaac Lab's
+# physics only ever looks at <collision>/<inertial>/<joint>. Dimensions are
+# expressed as ratios of the real structural geometry so the cosmetic shell
+# keeps tracking the robot if robot_params.yaml changes.
+
+_MATERIALS: dict[str, tuple[float, float, float, float]] = {
+    "chassis_dark":    (0.10, 0.10, 0.12, 1.0),   # matte chassis shell
+    "chassis_accent":  (0.90, 0.40, 0.04, 1.0),   # orange trim (Unitree/ANYmal-style)
+    "panel_dark":      (0.06, 0.06, 0.07, 1.0),   # side panels, vents, ribs, channels
+    "structural_grey": (0.42, 0.43, 0.45, 1.0),   # leg tubes (was grey/green/blue — unified)
+    "actuator_silver": (0.72, 0.73, 0.75, 1.0),   # QDD pancake motor housings
+    "sensor_black":    (0.04, 0.04, 0.05, 1.0),   # camera/lidar housings, motor end caps
+    "lens_glass":      (0.02, 0.05, 0.09, 1.0),   # camera lenses
+    "led_green":       (0.15, 0.95, 0.25, 1.0),   # status LED
+    "led_red":         (0.90, 0.08, 0.05, 1.0),   # rear tail light
+    "rubber_black":    (0.05, 0.05, 0.06, 1.0),   # foot pads
+}
+
+_MOTOR_DISC_LEN = 0.018
+_MOTOR_END_CAP_LEN = 0.004
+_RIB_THICKNESS = 0.006
+_RIB_RADIUS_SCALE = 1.15
+_CHANNEL_THICKNESS = 0.006
+_CHANNEL_WIDTH = 0.010
+_SCREW_RADIUS = 0.0028
+_SCREW_LENGTH = 0.004
+
+
+def _motor_disc_radius(effort_nm: float) -> float:
+    """Pancake QDD motor housing radius, scaled from the joint's rated torque
+    (purely cosmetic: real MIT-Cheetah/Unitree-style QDD actuators visibly
+    grow with torque rating). Does not touch the ImplicitActuatorCfg
+    effort_limit actually enforced in sim — that still comes from
+    robot_params.yaml via quadruped_env_cfg.py."""
+    return 0.030 * math.sqrt(effort_nm / 10.0)
+
+
+def _add_leg_ribs(link: ET.Element, radius: float, length: float) -> None:
+    """Three raised rings along the tube — reads as ribbed structural reinforcement."""
+    for frac in (0.30, 0.55, 0.80):
+        _visual_cylinder(
+            link, radius * _RIB_RADIUS_SCALE, _RIB_THICKNESS,
+            xyz=(0.0, 0.0, -length * frac),
+            material="panel_dark",
+        )
+
+
+def _add_cable_channel(link: ET.Element, radius: float, length: float) -> None:
+    """Raised strip along the front face — reads as a cable guide / spine."""
+    _visual_box(
+        link, (_CHANNEL_THICKNESS, _CHANNEL_WIDTH, length * 0.82),
+        xyz=(radius + _CHANNEL_THICKNESS / 2.0, 0.0, -length / 2.0),
+        material="panel_dark",
+    )
+
+
 # ── URDF builder ──────────────────────────────────────────────────────────────
 
 class URDFBuilder:
@@ -191,6 +261,7 @@ class URDFBuilder:
         self.root = ET.Element("robot", name=params["robot"]["name"])
 
     def build(self) -> "URDFBuilder":
+        _add_material_library(self.root, _MATERIALS)
         self._add_body()
         for leg_name, (xs, ys) in self.LEGS.items():
             self._add_leg(leg_name, xs, ys)
@@ -206,8 +277,121 @@ class URDFBuilder:
 
         link = ET.SubElement(self.root, "link", name="base_link")
         _inertial(link, mass, ixx, iyy, izz)
-        _visual_box(link, (lx, ly, lz), rgba=(0.18, 0.40, 0.78, 1.0))
+
+        # Load-bearing chassis — the only box on this link with a matching
+        # <collision>. Everything below is a bolt-on visual extra: no
+        # collision, no mass, so it cannot change contact detection, total
+        # mass, COM, or inertia.
+        _visual_box(link, (lx, ly, lz), material="chassis_dark")
         _collision_box(link, (lx, ly, lz))
+
+        # ── Top cover: electronics bay lid with an accent stripe ────────────
+        cover_h = lz * 0.35
+        cover_top_z = lz / 2.0 + cover_h
+        _visual_box(
+            link, (lx * 0.88, ly * 0.90, cover_h),
+            xyz=(0.0, 0.0, lz / 2.0 + cover_h / 2.0),
+            material="chassis_accent",
+        )
+
+        # ── Side panels + cooling vent slats ─────────────────────────────────
+        panel_t = 0.006
+        n_vents = 4
+        vent_span = lx * 0.5
+        for y_sign in (+1, -1):
+            panel_y = y_sign * (ly / 2.0 + panel_t / 2.0)
+            _visual_box(
+                link, (lx * 0.82, panel_t, lz * 0.75),
+                xyz=(0.0, panel_y, 0.0),
+                material="panel_dark",
+            )
+            vent_y = y_sign * (ly / 2.0 + panel_t + 0.001)
+            for i in range(n_vents):
+                vx = -vent_span / 2.0 + i * (vent_span / (n_vents - 1))
+                _visual_box(
+                    link, (0.012, 0.002, lz * 0.35),
+                    xyz=(vx, vent_y, 0.0),
+                    material="sensor_black",
+                )
+
+        # ── Front sensor fascia: stereo camera housing + lens pair ──────────
+        cam_face_x = lx / 2.0 + 0.022
+        _visual_box(
+            link, (0.022, ly * 0.55, lz * 0.55),
+            xyz=(lx / 2.0, 0.0, lz * 0.05),
+            material="sensor_black",
+        )
+        for y_sign in (+1, -1):
+            _visual_sphere(
+                link, 0.007,
+                xyz=(cam_face_x, y_sign * ly * 0.16, lz * 0.05),
+                material="lens_glass",
+            )
+
+        # ── LiDAR puck on the roof ────────────────────────────────────────────
+        _visual_cylinder(
+            link, 0.032, 0.022,
+            xyz=(lx * 0.03, 0.0, cover_top_z + 0.011),
+            material="sensor_black",
+        )
+
+        # ── IMU cover plate ──────────────────────────────────────────────────
+        _visual_box(
+            link, (0.022, 0.022, 0.008),
+            xyz=(lx * 0.13, 0.0, cover_top_z + 0.004),
+            material="chassis_accent",
+        )
+
+        # ── Status LED ────────────────────────────────────────────────────────
+        _visual_sphere(
+            link, 0.005,
+            xyz=(lx * 0.36, 0.0, cover_top_z + 0.003),
+            material="led_green",
+        )
+
+        # ── Rear fascia + tail light ──────────────────────────────────────────
+        _visual_box(
+            link, (0.018, ly * 0.5, lz * 0.5),
+            xyz=(-(lx / 2.0 + 0.009), 0.0, 0.0),
+            material="panel_dark",
+        )
+        _visual_sphere(
+            link, 0.006,
+            xyz=(-(lx / 2.0 + 0.019), 0.0, 0.0),
+            material="led_red",
+        )
+
+        # ── Carry handle (rear-mounted, clear of the front sensor stack) ────
+        handle_x = -lx * 0.15
+        handle_span = ly * 0.5
+        handle_h = 0.028
+        handle_r = 0.006
+        bar_z = cover_top_z + handle_h
+        _visual_cylinder(
+            link, handle_r, handle_span,
+            xyz=(handle_x, 0.0, bar_z),
+            rpy=(self.HALF_PI, 0.0, 0.0),
+            material="panel_dark",
+        )
+        for y_sign in (+1, -1):
+            _visual_cylinder(
+                link, handle_r, handle_h,
+                xyz=(handle_x, y_sign * handle_span / 2.0, cover_top_z + handle_h / 2.0),
+                material="panel_dark",
+            )
+
+        # ── Fastener heads at the top-cover corners ──────────────────────────
+        for x_sign in (+1, -1):
+            for y_sign in (+1, -1):
+                _visual_cylinder(
+                    link, _SCREW_RADIUS, _SCREW_LENGTH,
+                    xyz=(
+                        x_sign * lx * 0.40,
+                        y_sign * ly * 0.42,
+                        cover_top_z + _SCREW_LENGTH / 2.0,
+                    ),
+                    material="actuator_silver",
+                )
 
     # ── Leg (hip → thigh → shin → foot) ──────────────────────────────────────
 
@@ -261,12 +445,29 @@ class URDFBuilder:
             hip_link, r_hip, l_hip,
             xyz=com_hip,
             rpy=(self.HALF_PI, 0.0, 0.0),
-            rgba=(0.55, 0.55, 0.55, 1.0),
+            material="structural_grey",
         )
         _collision_cylinder(
             hip_link, r_hip, l_hip,
             xyz=com_hip,
             rpy=(self.HALF_PI, 0.0, 0.0),
+        )
+
+        # Pancake QDD motor housing at the hip joint itself (joint axis = x,
+        # so the disc's flat face — its z-axis before rotation — must point
+        # along x: rotate 90° about y).
+        hip_disc_r = _motor_disc_radius(lim["hip_abduction"]["effort_nm"])
+        _visual_cylinder(
+            hip_link, hip_disc_r, _MOTOR_DISC_LEN, xyz=(0.0, 0.0, 0.0),
+            rpy=(0.0, self.HALF_PI, 0.0), material="actuator_silver",
+        )
+        _visual_cylinder(
+            hip_link, hip_disc_r + 0.004, _MOTOR_END_CAP_LEN, xyz=(0.0, 0.0, 0.0),
+            rpy=(0.0, self.HALF_PI, 0.0), material="sensor_black",
+        )
+        _visual_cylinder(
+            hip_link, r_hip * 1.12, 0.006, xyz=(0.0, 0.0, 0.0),
+            rpy=(0.0, self.HALF_PI, 0.0), material="chassis_accent",
         )
 
         # ── thigh joint ───────────────────────────────────────────────────────
@@ -291,9 +492,25 @@ class URDFBuilder:
         _visual_cylinder(
             thigh_link, r_thigh, l_thigh,
             xyz=com_thigh,
-            rgba=(0.28, 0.65, 0.28, 1.0),
+            material="structural_grey",
         )
         _collision_cylinder(thigh_link, r_thigh, l_thigh, xyz=com_thigh)
+
+        leg_disc_r = _motor_disc_radius(lim["thigh"]["effort_nm"])
+        _visual_cylinder(
+            thigh_link, leg_disc_r, _MOTOR_DISC_LEN, xyz=(0.0, 0.0, 0.0),
+            rpy=(self.HALF_PI, 0.0, 0.0), material="actuator_silver",
+        )
+        _visual_cylinder(
+            thigh_link, leg_disc_r + 0.004, _MOTOR_END_CAP_LEN, xyz=(0.0, 0.0, 0.0),
+            rpy=(self.HALF_PI, 0.0, 0.0), material="sensor_black",
+        )
+        _visual_cylinder(
+            thigh_link, r_thigh * 1.12, 0.006, xyz=(0.0, 0.0, 0.0),
+            rpy=(self.HALF_PI, 0.0, 0.0), material="chassis_accent",
+        )
+        _add_leg_ribs(thigh_link, r_thigh, l_thigh)
+        _add_cable_channel(thigh_link, r_thigh, l_thigh)
 
         # ── knee joint ────────────────────────────────────────────────────────
         # At the bottom of the thigh link; rotates about y (knee flexion).
@@ -316,9 +533,31 @@ class URDFBuilder:
         _visual_cylinder(
             shin_link, r_shin, l_shin,
             xyz=com_shin,
-            rgba=(0.20, 0.55, 0.85, 1.0),
+            material="structural_grey",
         )
         _collision_cylinder(shin_link, r_shin, l_shin, xyz=com_shin)
+
+        _visual_cylinder(
+            shin_link, leg_disc_r, _MOTOR_DISC_LEN, xyz=(0.0, 0.0, 0.0),
+            rpy=(self.HALF_PI, 0.0, 0.0), material="actuator_silver",
+        )
+        _visual_cylinder(
+            shin_link, leg_disc_r + 0.004, _MOTOR_END_CAP_LEN, xyz=(0.0, 0.0, 0.0),
+            rpy=(self.HALF_PI, 0.0, 0.0), material="sensor_black",
+        )
+        _visual_cylinder(
+            shin_link, r_shin * 1.12, 0.006, xyz=(0.0, 0.0, 0.0),
+            rpy=(self.HALF_PI, 0.0, 0.0), material="chassis_accent",
+        )
+        _add_leg_ribs(shin_link, r_shin, l_shin)
+        _add_cable_channel(shin_link, r_shin, l_shin)
+
+        # Ankle accent ring, just above the foot.
+        _visual_cylinder(
+            shin_link, r_shin * 1.12, 0.006,
+            xyz=(0.0, 0.0, -l_shin + 0.01),
+            material="chassis_accent",
+        )
 
         # ── foot joint (fixed) + link ──────────────────────────────────────
         # Contact point at the tip of the shin — no mass, just a collision sphere.
@@ -332,8 +571,16 @@ class URDFBuilder:
         foot_link = ET.SubElement(self.root, "link", name=f"{name}_foot_link")
         ixx, iyy, izz = _sphere_inertia(m_foot, r_foot)
         _inertial(foot_link, m_foot, ixx, iyy, izz)
-        _visual_sphere(foot_link, r_foot, rgba=(0.90, 0.20, 0.10, 1.0))
+        _visual_sphere(foot_link, r_foot, material="rubber_black")
         _collision_sphere(foot_link, r_foot)
+
+        # Rubber foot pad: a flattened disc visually wrapping the contact
+        # sphere — same contact point, purely cosmetic bulge.
+        _visual_cylinder(
+            foot_link, r_foot * 1.3, r_foot * 0.5,
+            xyz=(0.0, 0.0, -r_foot * 0.15),
+            material="rubber_black",
+        )
 
     # ── Joint helper ──────────────────────────────────────────────────────────
 
