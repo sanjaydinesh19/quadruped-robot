@@ -228,10 +228,14 @@ class CommandsCfg:
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,
+        # x/z ranges narrowed from the reference's +-1.0: this robot's body is
+        # ~half the length of Go2/ANYmal, so +-1.0 m/s and rad/s are
+        # proportionally a much harder command for a policy still learning
+        # to walk at all.
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(-1.0, 1.0),
+            lin_vel_x=(-0.5, 0.5),
             lin_vel_y=(-0.5, 0.5),
-            ang_vel_z=(-1.0, 1.0),
+            ang_vel_z=(-0.5, 0.5),
             heading=(-math.pi, math.pi),
         ),
     )
@@ -248,33 +252,17 @@ class RewardsCfg:
     Everything else is a penalty that discourages bad strategies (bouncing,
     high energy use, bad posture, or falling).
 
-    Weights are tuned for a ~5 kg robot. Scale all weights together if
-    the reward is too noisy to converge.
-
-    IMPORTANT — this RewardManager only computes the per-step task/shaping
-    terms below. Every proven reference implementation (ETH legged_gym,
-    Isaac Lab's own ANYmal/A1/Go1 configs) additionally clips the summed
-    per-step reward to >= 0 before adding a large, uncapped penalty for a
-    real fall on top ("only_positive_rewards" in legged_gym). Isaac Lab's
-    manager-based RewardManager has no built-in equivalent, so that floor is
-    applied separately by RewardShapingWrapper in train_rl.py, not here.
-    Without it, an imperfect early walking attempt can accumulate more
-    negative reward per step (from the stability penalties below) than
-    standing rigidly still ever would — which is the literature-documented
-    mechanism behind this policy's observed "learn not to fall, then never
-    progress to walking" plateau.
+    Weights are aligned to Isaac Lab's own shipped Go2/A1 flat-terrain
+    configs (closest mass/action-scale match to this ~5 kg robot), read
+    directly from the local IsaacLab install rather than assumed. No
+    only-positive-rewards clamp or extra fall penalty here — neither
+    Go2, A1, nor ANYmal-C use one; falling is already penalised by losing
+    future reward through the base-contact termination below.
     """
 
     # ── Primary: velocity tracking ────────────────────────────────────────────
-    # 1.5 / 0.75 (Unitree Go2's ratio in Isaac Lab, vs. the generic ANYmal/
-    # legged_gym 1.0/0.5) — raised because TensorBoard showed the policy
-    # settling into a "stand still, don't fall" local optimum: episode length
-    # and reward both jumped hard at iteration ~800 and then plateaued flat
-    # through iteration 1800 with no further movement. That pattern is a
-    # documented failure mode (see feet_air_time/feet_slide comments below and
-    # RewardsCfg docstring) where standing still is never clearly worse than
-    # an imperfect walking attempt. Raising the tracking reward's weight
-    # relative to the stability penalties widens that gap.
+    # 1.5 / 0.75 matches Unitree Go2/A1's ratio (vs. the generic ANYmal/
+    # legged_gym 1.0/0.5).
     track_lin_vel_xy_exp = RewardTermCfg(
         func=mdp.track_lin_vel_xy_exp,
         weight=1.5,
@@ -288,48 +276,16 @@ class RewardsCfg:
 
     # ── Stability penalties ───────────────────────────────────────────────────
     lin_vel_z_l2 = RewardTermCfg(func=mdp.lin_vel_z_l2, weight=-2.0)
-    # -0.2 -> -0.4: at iteration ~700 this term plateaued around -4 (Episode_Reward)
-    # instead of improving alongside flat_orientation_l2's recovery — the policy
-    # keeps the body level through fast roll/pitch rotation (visible as "flailing"
-    # in checkpoint videos) rather than smooth weight-shifting. Doubling the
-    # weight raises the cost of achieving orientation via wobble specifically.
-    ang_vel_xy_l2 = RewardTermCfg(func=mdp.ang_vel_xy_l2, weight=-0.4)
-    # Increased from -2.0: robot was pitching forward to exploit velocity reward.
-    flat_orientation_l2 = RewardTermCfg(func=mdp.flat_orientation_l2, weight=-5.0)
-    # Penalise crouching — body centre should stay near nominal 0.32 m standing height.
-    base_height_l2 = RewardTermCfg(
-        func=mdp.base_height_l2,
-        weight=-10.0,
-        params={"target_height": 0.32},
-    )
+    ang_vel_xy_l2 = RewardTermCfg(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    # Go2/A1 flat use -2.5, not ANYmal-flat's -5.0 — matching the lighter,
+    # faster-reacting robot class this one is closer to.
+    flat_orientation_l2 = RewardTermCfg(func=mdp.flat_orientation_l2, weight=-2.5)
 
     # ── Joint health penalties ────────────────────────────────────────────────
-    joint_pos_limits = RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0)
-    # soft_ratio 0.9 -> 0.82: Episode_Reward/joint_vel_limits was still diving
-    # (-4 and worsening) at iteration ~700 with no inflection — joints were
-    # cruising close to the limit for long stretches before the penalty ever
-    # engaged. Tightening the soft ratio starts charging for it earlier.
-    joint_vel_limits = RewardTermCfg(
-        func=mdp.joint_vel_limits,
-        weight=-1.0,
-        params={"soft_ratio": 0.82},
-    )
-    joint_torques_l2 = RewardTermCfg(
-        func=mdp.joint_torques_l2, weight=-1.0e-5
-    )
-    # -2.5e-7 -> -7.5e-7 (3x): Episode_Reward/joint_acc_l2 was still diving
-    # linearly at iteration ~700 (-2.6 and worsening) — same escalating-jerk
-    # pattern as action_rate_l2 below, not yet strong enough to counter it.
-    joint_acc_l2 = RewardTermCfg(func=mdp.joint_acc_l2, weight=-7.5e-7)
-    # -0.01 -> -0.025: the largest-magnitude cost term in the whole reward
-    # (-6.76 at iteration ~700) and still diving steeply with no sign of
-    # leveling off — the policy is achieving its "stay upright, stay level"
-    # equilibrium via increasingly violent step-to-step action changes
-    # instead of a coordinated gait, and mean_reward has been flat near 0
-    # for 500+ iterations while this kept getting worse. Raising this
-    # (along with joint_acc_l2 and ang_vel_xy_l2 above) directly taxes the
-    # thrashing rather than the visible symptom of it.
-    action_rate_l2 = RewardTermCfg(func=mdp.action_rate_l2, weight=-0.025)
+    # Go2/A1 raise this well above the generic -1e-5 default on flat terrain.
+    joint_torques_l2 = RewardTermCfg(func=mdp.joint_torques_l2, weight=-2.5e-5)
+    joint_acc_l2 = RewardTermCfg(func=mdp.joint_acc_l2, weight=-2.5e-7)
+    action_rate_l2 = RewardTermCfg(func=mdp.action_rate_l2, weight=-0.01)
 
     # ── Gait quality ──────────────────────────────────────────────────────────
     # Only penalise joint deviation while (near-)stationary — applied unconditionally
@@ -339,21 +295,11 @@ class RewardsCfg:
         weight=-0.1,
         params={"command_name": "base_velocity"},
     )
-    # Reward feet spending time in the air — the actual signal for "step, don't slide".
-    # weight 0.5 (ANYmal-flat's value; legged_gym's own base config uses 1.0)
-    # rather than the generic isaaclab default of 0.125 — this term needs to
-    # compete with the stability penalties, not just nudge them.
-    # threshold 0.3s (down from 0.4s): this robot's legs are much shorter than
-    # ANYmal's (0.4m thigh+shin vs ANYmal's ~0.55m), so a natural step cadence
-    # is faster and a shorter threshold matches its actual stride timing. Note
-    # the formula (last_air_time - threshold) * first_contact is negative for
-    # any footfall shorter than the threshold — a real behavior of this exact
-    # formula in every reference implementation, not a bug — which is another
-    # reason the RewardShapingWrapper floor in train_rl.py matters: it stops
-    # a few punished tentative steps from ever outweighing standing still.
+    # 0.25 matches Go2/A1 flat (was 0.5). threshold 0.3s (vs. their 0.5s) is
+    # this robot's own leg-length-derived stride timing, not a reference value.
     feet_air_time = RewardTermCfg(
         func=gait_mdp.feet_air_time,
-        weight=0.5,
+        weight=0.25,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_shin_link"),
@@ -369,13 +315,10 @@ class RewardsCfg:
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_shin_link"),
         },
     )
-    # Penalise thigh contact only. shin_link IS the foot (merged by --merge-joints),
-    # so shin contact is normal stance — penalising it here (as a prior commit did,
-    # to fight a crawling exploit) fought the newly-added feet_air_time/feet_slide
-    # terms and is the likely cause of the current gliding behaviour: the policy
-    # was punished for planting any real ground-reaction force on its feet, so it
-    # learned to skim instead. base_height_l2 + flat_orientation_l2 above now
-    # handle the crawling case without penalising legitimate foot contact.
+    # Penalise thigh contact only — shin_link IS the foot (merged by
+    # --merge-joints), so shin contact is normal stance. Go2/A1 disable this
+    # term entirely; kept here since this robot has previously exploited
+    # crawling on its thighs without it.
     undesired_contacts = RewardTermCfg(
         func=mdp.undesired_contacts,
         weight=-1.0,
