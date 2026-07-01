@@ -295,11 +295,15 @@ class RewardsCfg:
         weight=-0.1,
         params={"command_name": "base_velocity"},
     )
-    # 0.25 matches Go2/A1 flat (was 0.5). threshold 0.3s (vs. their 0.5s) is
-    # this robot's own leg-length-derived stride timing, not a reference value.
+    # 0.25 (Go2/A1 flat's value) let training plateau for 300+ iterations at
+    # near-zero feet_air_time — a slow foot-drag was apparently cheaper than
+    # real stepping. 1.0 is legged_gym's own base-config value: still a real
+    # reference number, just from the less foot-shy end of the range.
+    # threshold 0.3s (vs. Go2/A1's 0.5s) is this robot's own leg-length-
+    # derived stride timing, not a reference value.
     feet_air_time = RewardTermCfg(
         func=gait_mdp.feet_air_time,
-        weight=0.25,
+        weight=1.0,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_shin_link"),
