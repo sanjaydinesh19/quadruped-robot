@@ -53,6 +53,7 @@ import src.simulation.isaac_lab  # noqa: F401
 
 from src.simulation.isaac_lab.quadruped_env_cfg import QuadrupedFlatEnvCfg
 from src.simulation.isaac_lab.agents.rsl_rl_ppo_cfg import QuadrupedPPORunnerCfg
+from src.simulation.isaac_lab.chase_camera import update_chase_camera
 from src.simulation.isaac_lab.rsl_rl_adapter import build_runner_cfg_dict
 
 # ── Build env ─────────────────────────────────────────────────────────────────
@@ -89,6 +90,7 @@ while simulation_app.is_running():
     obs, _, _, _ = env.step(actions)   # RslRlVecEnvWrapper: (obs, rew, done, extras)
 
     if args_cli.video:
+        update_chase_camera(env)   # follows env 0 — the first of --num_envs robots
         frame = env.unwrapped.render()   # bypass wrapper; ManagerBasedRLEnv returns (H,W,3)
         if frame is not None:
             frames.append(frame)

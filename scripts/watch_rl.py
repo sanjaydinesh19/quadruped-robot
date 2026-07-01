@@ -60,6 +60,7 @@ import src.simulation.isaac_lab  # noqa: F401 — triggers gym.register side-eff
 
 from src.simulation.isaac_lab.quadruped_env_cfg import QuadrupedFlatEnvCfg
 from src.simulation.isaac_lab.agents.rsl_rl_ppo_cfg import QuadrupedPPORunnerCfg
+from src.simulation.isaac_lab.chase_camera import update_chase_camera
 from src.simulation.isaac_lab.rsl_rl_adapter import build_runner_cfg_dict, latest_checkpoint
 
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "rsl_rl")
@@ -139,6 +140,7 @@ while simulation_app.is_running():
     obs, _, _, _ = env.step(actions)
 
     if now - last_frame_t >= frame_period:
+        update_chase_camera(env)
         frame = env.unwrapped.render()
         if frame is not None:
             buf = io.BytesIO()
