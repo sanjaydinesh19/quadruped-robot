@@ -295,10 +295,9 @@ class RewardsCfg:
         weight=-0.1,
         params={"command_name": "base_velocity"},
     )
-    # 0.25 (Go2/A1 flat's value) let training plateau for 300+ iterations at
-    # near-zero feet_air_time — a slow foot-drag was apparently cheaper than
-    # real stepping. 1.0 is legged_gym's own base-config value: still a real
-    # reference number, just from the less foot-shy end of the range.
+    # Scoped to .*_foot_link, not .*_shin_link — with foot_link merged into
+    # shin_link, this couldn't distinguish a real foot strike from the
+    # shin/knee dragging on the ground; both looked identical to the sensor.
     # threshold 0.3s (vs. Go2/A1's 0.5s) is this robot's own leg-length-
     # derived stride timing, not a reference value.
     feet_air_time = RewardTermCfg(
@@ -306,7 +305,7 @@ class RewardsCfg:
         weight=1.0,
         params={
             "command_name": "base_velocity",
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_shin_link"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot_link"),
             "threshold": 0.3,
         },
     )
@@ -315,8 +314,8 @@ class RewardsCfg:
         func=gait_mdp.feet_slide,
         weight=-0.25,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_shin_link"),
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_shin_link"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot_link"),
         },
     )
     # Penalise thigh contact only — shin_link IS the foot (merged by
