@@ -50,9 +50,11 @@ echo "[convert_to_usd] URDF  : $URDF"
 echo "[convert_to_usd] Output: $OUTPUT_DIR/quadruped.usd"
 echo "[convert_to_usd] Running Isaac Lab URDF importer (headless)..."
 
-# --merge-joints: fuses the four fixed foot joints into their shin links,
-#   reducing articulation complexity without losing collision geometry.
-#   (Isaac Lab 4.5 renamed --merge-fixed-joints → --merge-joints)
+# NOT passing --merge-joints: foot_link must stay its own rigid body so its
+# contact sensor is distinct from shin_link's. Merging them (as this script
+# used to) made feet_air_time/feet_slide unable to tell a real foot strike
+# apart from the shin/knee dragging on the ground — both registered as the
+# same "shin_link contact" event.
 #
 # Uses scripts/isaac_urdf_convert.py instead of IsaacLab's own
 # scripts/tools/convert_urdf.py: on this Isaac Sim 4.5 install, the headless
@@ -64,7 +66,6 @@ echo "[convert_to_usd] Running Isaac Lab URDF importer (headless)..."
 "$ISAACLAB" -p "$REPO_ROOT/scripts/isaac_urdf_convert.py" \
   "$URDF" \
   "$OUTPUT_BASE" \
-  --merge-joints \
   --headless
 
 echo "[convert_to_usd] Done → $OUTPUT_DIR/quadruped.usd"
