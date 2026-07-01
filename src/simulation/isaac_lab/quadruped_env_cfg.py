@@ -318,15 +318,18 @@ class RewardsCfg:
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot_link"),
         },
     )
-    # Penalise thigh contact only — shin_link IS the foot (merged by
-    # --merge-joints), so shin contact is normal stance. Go2/A1 disable this
-    # term entirely; kept here since this robot has previously exploited
-    # crawling on its thighs without it.
+    # Thigh contact was always undesired. Shin contact now is too — foot_link
+    # is its own body (see feet_air_time above), so shin_link touching the
+    # ground can only mean knee-dragging, not a legitimate foot strike.
+    # Go2/A1 disable this term entirely; kept here since this robot has
+    # previously exploited crawling on its thighs without it.
     undesired_contacts = RewardTermCfg(
         func=mdp.undesired_contacts,
         weight=-1.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_thigh_link"),
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces", body_names=[".*_thigh_link", ".*_shin_link"]
+            ),
             "threshold": 1.0,
         },
     )
