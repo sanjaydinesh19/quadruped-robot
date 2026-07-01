@@ -10,6 +10,8 @@ watch_rl.py so the API-mismatch fixes only need to happen in one place.
 """
 from __future__ import annotations
 
+import glob
+import os
 from typing import Any
 
 _VALID_ALG_KWARGS = {
@@ -42,3 +44,19 @@ def build_runner_cfg_dict(runner_cfg: Any) -> dict:
         }
 
     return runner_cfg_dict
+
+
+def latest_checkpoint(log_dir: str) -> str | None:
+    """Path to the most recently *written* checkpoint in log_dir, or None.
+
+    OnPolicyRunner.load() needs a specific file, not a directory — passing
+    log_dir straight through raises IsADirectoryError. Picking by mtime
+    rather than the highest iteration number in the filename matters too: a
+    fresh run restarts its iteration counter from 0 in the same log_dir, so
+    an old run's high-numbered checkpoint (e.g. model_2999.pt) would
+    otherwise outrank the new run's actual latest by filename alone.
+    """
+    checkpoints = glob.glob(os.path.join(log_dir, "model_*.pt"))
+    if not checkpoints:
+        return None
+    return max(checkpoints, key=os.path.getmtime)

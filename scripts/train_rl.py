@@ -60,7 +60,7 @@ import src.simulation.isaac_lab  # noqa: F401 — triggers gym.register side-eff
 from src.simulation.isaac_lab.quadruped_env_cfg import QuadrupedFlatEnvCfg
 from src.simulation.isaac_lab.agents.rsl_rl_ppo_cfg import QuadrupedPPORunnerCfg
 from src.simulation.isaac_lab.reward_shaping_wrapper import RewardShapingWrapper
-from src.simulation.isaac_lab.rsl_rl_adapter import build_runner_cfg_dict
+from src.simulation.isaac_lab.rsl_rl_adapter import build_runner_cfg_dict, latest_checkpoint
 
 # ── Step 3: build environment ─────────────────────────────────────────────────
 env_cfg = QuadrupedFlatEnvCfg()
@@ -96,9 +96,15 @@ runner = OnPolicyRunner(
 
 # ── Step 5: optionally resume ─────────────────────────────────────────────────
 if args_cli.resume:
-    # Loads the latest checkpoint from log_dir automatically
-    runner.load(log_dir)
-    print(f"[train_rl] Resumed from {log_dir}")
+    # OnPolicyRunner.load() needs a specific checkpoint file, not a
+    # directory — passing log_dir straight through raises IsADirectoryError.
+    checkpoint_path = latest_checkpoint(log_dir)
+    if checkpoint_path is None:
+        raise FileNotFoundError(
+            f"--resume was passed but no model_*.pt checkpoint exists in {log_dir}"
+        )
+    runner.load(checkpoint_path)
+    print(f"[train_rl] Resumed from {checkpoint_path}")
 
 # ── Step 6: train ─────────────────────────────────────────────────────────────
 print(f"[train_rl] Starting training: {runner_cfg.max_iterations} iterations, "

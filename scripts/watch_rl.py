@@ -22,7 +22,6 @@ open:
 from __future__ import annotations
 
 import argparse
-import glob
 import io
 import os
 import sys
@@ -61,7 +60,7 @@ import src.simulation.isaac_lab  # noqa: F401 — triggers gym.register side-eff
 
 from src.simulation.isaac_lab.quadruped_env_cfg import QuadrupedFlatEnvCfg
 from src.simulation.isaac_lab.agents.rsl_rl_ppo_cfg import QuadrupedPPORunnerCfg
-from src.simulation.isaac_lab.rsl_rl_adapter import build_runner_cfg_dict
+from src.simulation.isaac_lab.rsl_rl_adapter import build_runner_cfg_dict, latest_checkpoint
 
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "rsl_rl")
 
@@ -81,21 +80,8 @@ _state: dict = {"policy": None, "checkpoint": None, "frame": None}
 _lock = threading.Lock()
 
 
-def _latest_checkpoint() -> str | None:
-    """Most recently *written* checkpoint, not highest iteration number.
-
-    A fresh training run restarts its iteration counter from 0 in the same
-    log_dir, so an old run's high-numbered checkpoints (e.g. model_2999.pt)
-    would otherwise outrank the new run's early ones by filename alone.
-    """
-    checkpoints = glob.glob(os.path.join(LOG_DIR, "model_*.pt"))
-    if not checkpoints:
-        return None
-    return max(checkpoints, key=os.path.getmtime)
-
-
 def _reload_if_newer() -> None:
-    path = _latest_checkpoint()
+    path = latest_checkpoint(LOG_DIR)
     if path is None or path == _state["checkpoint"]:
         return
     runner.load(path)
