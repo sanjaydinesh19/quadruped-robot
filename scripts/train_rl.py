@@ -59,7 +59,6 @@ import src.simulation.isaac_lab  # noqa: F401 — triggers gym.register side-eff
 
 from src.simulation.isaac_lab.quadruped_env_cfg import QuadrupedFlatEnvCfg
 from src.simulation.isaac_lab.agents.rsl_rl_ppo_cfg import QuadrupedPPORunnerCfg
-from src.simulation.isaac_lab.reward_shaping_wrapper import RewardShapingWrapper
 from src.simulation.isaac_lab.rsl_rl_adapter import build_runner_cfg_dict, latest_checkpoint
 
 # ── Step 3: build environment ─────────────────────────────────────────────────
@@ -68,11 +67,6 @@ env_cfg.scene.num_envs = args_cli.num_envs
 
 env = ManagerBasedRLEnv(cfg=env_cfg)
 env = RslRlVecEnvWrapper(env)
-# Only-positive-rewards floor + uncapped fall penalty — see
-# reward_shaping_wrapper.py for why this matters. Only applied during
-# training: play_rl.py/watch_rl.py discard the reward return value entirely,
-# so there's nothing for it to affect there.
-env = RewardShapingWrapper(env)
 
 # ── Step 4: configure runner ──────────────────────────────────────────────────
 runner_cfg = QuadrupedPPORunnerCfg()
