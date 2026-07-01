@@ -292,7 +292,10 @@ class RewardsCfg:
     feet_slide = RewardTermCfg(
         func=gait_mdp.feet_slide,
         weight=-0.25,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_shin_link")},
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_shin_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_shin_link"),
+        },
     )
     # Penalise thigh contact only. shin_link IS the foot (merged by --merge-joints),
     # so shin contact is normal stance — penalising it here (as a prior commit did,
