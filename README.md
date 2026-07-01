@@ -269,6 +269,25 @@ random pushes every 10–15 s.
 
 ---
 
+## Training Progress
+
+**V3** (PPO, 4600 iterations, reward weights realigned to Go2/A1-class reference configs):
+
+<video src="docs/videos/final_v3.mp4" controls width="480"></video>
+
+The robot converged to a stable, collision-free stance — balancing entirely on its
+feet with zero knee/thigh contact (`undesired_contacts = 0.0`) and tracking commanded
+velocity reasonably well (`error_vel_xy ≈ 0.12`). It has **not** yet learned a true
+stepping gait: `feet_air_time`/`feet_slide` stayed negative and flat for the whole run,
+meaning the policy settled on a static/creeping solution rather than an alternating trot.
+
+Root cause: those two reward terms contribute well under 0.1% of the total per-episode
+reward at their current weights, so there's no real incentive to trade tracking accuracy
+(already near-saturated) for genuine foot lift-off. Next run needs those weights raised
+substantially before more training iterations will help.
+
+---
+
 ## Status
 
 | Component | State |
@@ -279,7 +298,7 @@ random pushes every 10–15 s.
 | RViz2 visualisation | Done |
 | USD asset | Done |
 | Isaac Lab env (flat terrain) | Done |
-| RL training (flat terrain) | In progress |
+| RL training (flat terrain) | V3 converged — stable stance, gait not yet emerged |
 | Rough terrain curriculum | Not started |
 | ROS2 controllers | Not started |
 | Hardware bring-up | Not started |
