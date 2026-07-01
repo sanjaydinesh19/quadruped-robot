@@ -28,8 +28,11 @@ class QuadrupedPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     obs_groups = {"actor": ["policy"], "critic": ["policy"]}
 
     # Actor: stochastic MLP with Gaussian output (mean + fixed std).
+    # [128,128,128] matches Isaac Lab's own Go2Flat/A1Flat/AnymalCFlat configs
+    # (their *rough*-terrain configs use the larger [512,256,128] — we're
+    # flat-only, so the smaller/faster-converging network is the right match).
     actor = RslRlMLPModelCfg(
-        hidden_dims=[512, 256, 128],
+        hidden_dims=[128, 128, 128],
         activation="elu",
         distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(
             init_std=1.0,
@@ -39,7 +42,7 @@ class QuadrupedPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
     # Critic: deterministic value MLP (no distribution needed).
     critic = RslRlMLPModelCfg(
-        hidden_dims=[512, 256, 128],
+        hidden_dims=[128, 128, 128],
         activation="elu",
     )
 
