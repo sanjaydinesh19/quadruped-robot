@@ -281,10 +281,40 @@ velocity reasonably well (`error_vel_xy ≈ 0.12`). It has **not** yet learned a
 stepping gait: `feet_air_time`/`feet_slide` stayed negative and flat for the whole run,
 meaning the policy settled on a static/creeping solution rather than an alternating trot.
 
-Root cause: those two reward terms contribute well under 0.1% of the total per-episode
-reward at their current weights, so there's no real incentive to trade tracking accuracy
-(already near-saturated) for genuine foot lift-off. Next run needs those weights raised
-substantially before more training iterations will help.
+Root cause (full audit, corrected from the earlier "raise the weights" hypothesis —
+V3 already raised `feet_air_time` 0.25 → 1.0 and it changed nothing):
+
+1. **`feet_air_time` taxed walking.** The term pays `(air_time − threshold)` at
+   touchdown. The 0.3 s threshold was stride-derived, but swing time for 0.40 m legs
+   is ~0.2 s — so every naturally-timed step earned a *negative* reward, while never
+   stepping earned exactly 0. Raising the weight only raised the tax. This is why the
+   term stayed negative and flat all run.
+2. **Commands were trackable without stepping.** With commands capped at ±0.5 m/s and
+   the standard `exp(−err²/0.25)` kernel, a planted-feet creep tracks almost perfectly
+   (even standing still keeps 37 % of tracking reward under the worst-case command).
+   legged_gym / Isaac Lab pair that same kernel with ±1.0 m/s commands, where creeping
+   physically cannot track — that pressure is what makes gait emerge there.
+3. **Every gradient away from creeping was negative before it was positive** —
+   transient `lin_vel_z`, orientation, action-rate penalties plus fall risk, against
+   ~zero marginal tracking gain. A converged low-entropy PPO policy never crosses
+   that valley.
+
+**V4** (reward/command redesign — audited against Isaac Lab Go2/A1/ANYmal, legged_gym,
+Walk These Ways, RMA):
+
+| Change | V3 | V4 | Rationale |
+|---|---|---|---|
+| `feet_air_time.threshold` | 0.3 s | 0.15 s | Below natural swing time → every real step is net-positive; creeping still earns 0 |
+| `lin_vel_x` command range | ±0.5 | ±1.0 | Creeping can't track 1 m/s → tracking itself demands stepping (reference range; speed scales with leg length, and legs are Go1-class) |
+| `ang_vel_z` command range | ±0.5 | ±1.0 | Same pressure for turning in place |
+| `joint_deviation_hip_l1` | — | −0.2 (hips, always-on) | Kills the splayed-stance creep posture; hips stay ~0 in a trot so it doesn't fight gait (WTW-style hip regularisation) |
+| base COM randomisation | ±0.05 m xy | ±0.03 m xy | ±5 cm is 12.5 % of this body's length — over-hard DR that rewarded conservative wide stances |
+
+Deliberately unchanged: all reward weights (already aligned to Go2/A1 flat references),
+the 48-dim observation set, and the PPO hyperparameters (verbatim match to reference
+flat-terrain configs — the bottomed-out adaptive LR was a symptom of convergence, not
+a cause). No base-height penalty, foot-clearance reward, or gait/phase clock was added:
+the first fights natural gait oscillation and the last two hard-code a specific gait.
 
 ---
 
@@ -298,7 +328,7 @@ substantially before more training iterations will help.
 | RViz2 visualisation | Done |
 | USD asset | Done |
 | Isaac Lab env (flat terrain) | Done |
-| RL training (flat terrain) | V3 converged — stable stance, gait not yet emerged |
+| RL training (flat terrain) | V4 redesign ready — V3 creep optimum root-caused, retraining pending |
 | Rough terrain curriculum | Not started |
 | ROS2 controllers | Not started |
 | Hardware bring-up | Not started |
