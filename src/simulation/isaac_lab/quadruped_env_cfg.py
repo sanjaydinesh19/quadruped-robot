@@ -229,14 +229,19 @@ class CommandsCfg:
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,
-        # x/z ranges narrowed from the reference's +-1.0: this robot's body is
-        # ~half the length of Go2/ANYmal, so +-1.0 m/s and rad/s are
-        # proportionally a much harder command for a policy still learning
-        # to walk at all.
+        # x/yaw at the reference +-1.0 (legged_gym A1, Isaac Lab Go2) — achievable
+        # speed scales with leg length (0.40 m here, Go1-class), not body length,
+        # so the earlier +-0.5 narrowing was over-conservative. It also created
+        # the V3 creep optimum: with the exp(-err^2/0.25) tracking kernel, a
+        # planted-feet shuffle can track <=0.4 m/s almost perfectly and even
+        # standing still under a 0.5 m/s command keeps 37% of the tracking
+        # reward. At 1.0 m/s creeping physically cannot track, so the dominant
+        # reward term itself now demands stepping. lin_vel_y stays +-0.5:
+        # lateral gait is legitimately harder for a 0.2 m-wide robot.
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 0.5),
+            lin_vel_x=(-1.0, 1.0),
             lin_vel_y=(-0.5, 0.5),
-            ang_vel_z=(-0.5, 0.5),
+            ang_vel_z=(-1.0, 1.0),
             heading=(-math.pi, math.pi),
         ),
     )
@@ -296,18 +301,32 @@ class RewardsCfg:
         weight=-0.1,
         params={"command_name": "base_velocity"},
     )
+    # Hip abduction stays near zero in any straight-line gait, so unlike the
+    # gated all-joint term above this can run unconditionally without fighting
+    # leg swing (Walk-These-Ways-style hip regularisation). It exists to kill
+    # the V3 creep posture: legs splayed wide for a static balance polygon —
+    # nothing else penalises that while a movement command is active.
+    joint_deviation_hip_l1 = RewardTermCfg(
+        func=mdp.joint_deviation_l1,
+        weight=-0.2,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*_hip_joint")},
+    )
     # Scoped to .*_foot_link, not .*_shin_link — with foot_link merged into
     # shin_link, this couldn't distinguish a real foot strike from the
     # shin/knee dragging on the ground; both looked identical to the sensor.
-    # threshold 0.3s (vs. Go2/A1's 0.5s) is this robot's own leg-length-
-    # derived stride timing, not a reference value.
+    # threshold must sit BELOW the natural swing duration (~0.2s for 0.40m
+    # legs), because the term pays (air_time - threshold) at touchdown: V3's
+    # 0.3s was stride-derived, i.e. ~2x swing time, so every naturally-timed
+    # step earned a NEGATIVE reward while never stepping earned exactly 0 —
+    # the term taxed walking and subsidised the creep. (Raising the weight in
+    # V3 only raised the tax.) 0.15s keeps any real step net-positive.
     feet_air_time = RewardTermCfg(
         func=gait_mdp.feet_air_time,
         weight=1.0,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot_link"),
-            "threshold": 0.3,
+            "threshold": 0.15,
         },
     )
     # Penalise a planted foot sliding — this is the direct fix for the gliding exploit.
@@ -390,16 +409,17 @@ class EventCfg:
         },
     )
 
-    # Randomise base COM offset — present in isaaclab's own ANYmal config
-    # (±0.05m xy / ±0.01m z) but was missing here. A real robot's COM never
-    # sits exactly at the URDF-nominal point once wiring/battery/sensors are
-    # added, so this closes a real sim-to-real gap.
+    # Randomise base COM offset — a real robot's COM never sits exactly at the
+    # URDF-nominal point once wiring/battery/sensors are added. ±0.03m xy, not
+    # ANYmal's ±0.05m: that reference value is 12.5% of this 0.4m body's length
+    # (vs ~7% of ANYmal's) — disproportionately hard randomisation rewards
+    # conservative wide-stance balancing, i.e. it pushed toward the creep.
     randomize_base_com = EventTermCfg(
         func=mdp.randomize_rigid_body_com,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
-            "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.01, 0.01)},
+            "com_range": {"x": (-0.03, 0.03), "y": (-0.03, 0.03), "z": (-0.01, 0.01)},
         },
     )
 
