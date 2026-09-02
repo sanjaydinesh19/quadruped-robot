@@ -1,14 +1,46 @@
 """
 Full ManagerBasedRLEnv configuration for quadruped flat-terrain locomotion.
 
-The robot learns to track commanded (vx, vy, wz) velocity using a position-
-target action space over all 12 joints. Observations are proprioceptive only
-(no vision) to match what will be available on hardware.
+V6: a faithful port of Isaac Lab's own Unitree Go2 flat-terrain velocity task
+(isaaclab_tasks/manager_based/locomotion/velocity + config/go2, read at the
+v2.3.2 tag — the exact version this project pins), cross-checked against
+legged_gym's A1 config. Walking quadrupeds are a solved problem; V3-V5 kept
+inventing reward terms and thresholds on top of a half-matched port and got a
+creep every time. V6's rule: match the reference exactly, and deviate only
+where this robot's geometry genuinely differs — with the reason written down.
+
+What V3-V5 got wrong (all verified against reference source, not assumed):
+
+  * `feet_air_time` threshold. V3 used 0.3s, V4 "root-caused" the creep to
+    that threshold taxing walking and cut it to 0.15s. The reference uses
+    **0.5s** — higher than the value V4 called the bug — with weight 0.25
+    (we had 1.0, 4x too high). The V4 analysis was backwards: this term is a
+    small regulariser in every working config, not the engine of gait.
+  * Extra invented terms. `joint_deviation_hip_l1` (-0.2, always-on, directly
+    penalising the hip motion a gait needs), `stand_still_joint_deviation_l1`,
+    `feet_air_time_variance` (-1.0, reconstructed from an unverifiable source),
+    `joint_vel_l2`, plus a hand-rolled command curriculum. None exist in Go2
+    flat. Every one was a confound; all are gone.
+  * Ground friction. We randomised static/dynamic over (0.4, 0.9) — the low
+    end is a genuinely slippery floor, which makes the planted-foot glide
+    *physically cheap*. The reference uses fixed 0.8 static / 0.6 dynamic.
+    This is probably the single biggest enabler of the creep.
+  * Default stance. Ours stood nearly straight-legged (thigh 0.644, knee
+    -1.345). Every Unitree reference stands deeply crouched (thigh 0.8,
+    calf -1.5). With `use_default_offset=True` and action scale 0.25, actions
+    are offsets *from this pose* — from a straight-legged stance ±0.25 rad
+    cannot produce a real swing, so the policy physically could not step even
+    if the reward said to.
+  * `undesired_contacts` covered thigh **and shin**. The reference covers
+    thigh only (Go2 disables it outright). Penalising shin contact discourages
+    the deep leg flexion a real gait needs.
+  * `soft_joint_pos_limit_factor` was never set (defaults to 1.0). Every
+    Unitree reference sets 0.9.
 
 Scene
 -----
   base_link (body)
-  └─ 4× hip → thigh → shin → foot_link  (12 revolute + 4 fixed joints)
+  └─ 4x hip -> thigh -> shin -> foot_link  (12 revolute + 4 fixed joints)
   contact_forces sensor on all four foot_links
   IMU sensor on base_link
 
@@ -18,16 +50,15 @@ Obs (48-dim)
   base angular velocity  [3]   body frame, noisy
   projected gravity      [3]   body frame, noisy
   velocity command       [3]   (vx, vy, wz), ground-truth
-  joint pos − default    [12]  noisy
+  joint pos - default    [12]  noisy
   joint velocities       [12]  noisy
   last action            [12]  clean
+  (noise magnitudes verified as an exact match to the reference config)
 
 Actions (12-dim)
 ----------------
-  joint position offsets from the default standing pose, clipped to ±0.25 rad
-  (matches A1/Go1-class action scaling — see ActionsCfg for why this is
-  narrower than isaaclab's ANYmal default of 0.5).
-  Isaac Lab's ImplicitActuator converts these targets to torques via PD control.
+  joint position offsets from the default standing pose, scaled 0.25
+  (Go2's own override of the generic 0.5 default).
 """
 from __future__ import annotations
 
@@ -36,11 +67,10 @@ from pathlib import Path
 
 import isaaclab.envs.mdp as mdp
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.actuators import DCMotorCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import (
-    CurriculumTermCfg,
     EventTermCfg,
     ObservationGroupCfg,
     ObservationTermCfg,
@@ -61,11 +91,31 @@ _ASSETS_DIR = Path(__file__).resolve().parents[3] / "assets" / "quadruped"
 QUADRUPED_USD_PATH = str(_ASSETS_DIR / "quadruped.usd")
 
 # ── Default standing joint angles (rad) ──────────────────────────────────────
-# Derived from IK with foot target at (0, ±0.162, −0.30) in body frame.
-# Hip=0°, Thigh=+36.9° (0.644 rad), Knee=−77° (−1.345 rad).
+# V6: adopted from UNITREE_GO2_CFG / UNITREE_A1_CFG / UNITREE_GO1_CFG, which
+# all share thigh=0.8, calf=-1.5 — a deeply crouched stance. V3-V5 used an
+# IK-derived near-straight pose (thigh 0.644, knee -1.345) that left almost no
+# usable swing range within the +-0.25 rad action window.
+#
+# Two deliberate deviations from the Unitree numbers, both geometry-driven:
+#   * Hip stays 0.0, not the reference +-0.1. The reference splays the legs
+#     outward, but that sign convention is tied to Unitree's hip axis
+#     orientation; this URDF's convention (positive = adduction, i.e. inward,
+#     per config/robot_params.yaml) is not verified to match, and a wrong sign
+#     would pull the legs *together* under the body. 0.0 is neutral in either
+#     convention.
+#   * Front and rear thighs both use 0.8. Unitree tucks the rear legs harder
+#     (front 0.8 / rear 1.0) because their legs mount asymmetrically; this
+#     robot's URDF is generated symmetrically from robot_params.yaml, so
+#     copying that asymmetry would just pitch the body nose-up.
 _STAND_HIP   =  0.000
-_STAND_THIGH =  0.644
-_STAND_KNEE  = -1.345
+_STAND_THIGH =  0.800
+_STAND_KNEE  = -1.500
+
+# Resulting stance height, from this robot's link lengths (l_thigh=0.209,
+# l_shin=0.195, shin length already runs to the foot contact point):
+#   0.209*cos(0.8) + 0.195*cos(0.8-1.5) = 0.146 + 0.149 = 0.295 m
+# Spawn just above it so the robot settles onto its feet rather than dropping.
+_INIT_HEIGHT = 0.34
 
 
 # ── Scene ─────────────────────────────────────────────────────────────────────
@@ -104,9 +154,13 @@ class QuadrupedSceneCfg(InteractiveSceneCfg):
                 solver_velocity_iteration_count=0,
             ),
         ),
+        # 0.9, matching every Unitree reference cfg. Never set before V6, so it
+        # defaulted to 1.0 — meaning the `dof_pos_limits` penalty below only
+        # fired at the true hard limit instead of 10% short of it, i.e. it was
+        # very nearly a no-op (it logged ~-0.0001 all through the V5 run).
+        soft_joint_pos_limit_factor=0.9,
         init_state=ArticulationCfg.InitialStateCfg(
-            # z=0.36m: body centre above ground at nominal standing height (0.32m) + 0.04m margin
-            pos=(0.0, 0.0, 0.36),
+            pos=(0.0, 0.0, _INIT_HEIGHT),
             joint_pos={
                 "FL_hip_joint":   _STAND_HIP,   "FR_hip_joint":   _STAND_HIP,
                 "RL_hip_joint":   _STAND_HIP,   "RR_hip_joint":   _STAND_HIP,
@@ -118,25 +172,35 @@ class QuadrupedSceneCfg(InteractiveSceneCfg):
             joint_vel={".*": 0.0},
         ),
         actuators={
-            # QDD motors modelled as implicit PD controllers.
-            # Kp=25 N·m/rad, Kd=0.5 N·m·s/rad is typical for lightweight QDD legs.
-            # Split into two groups so hip effort_limit matches the 10 N·m in
-            # config/robot_params.yaml — a single shared group previously gave
-            # hips the same 20 N·m as thigh/knee, silently overriding the URDF's
-            # per-joint limits (harmless for training, but wrong for sim-to-real).
-            "hips": ImplicitActuatorCfg(
+            # V6: DCMotorCfg, not ImplicitActuatorCfg — Go2 and A1 both use it.
+            # It models the DC torque-speed curve, so available torque falls off
+            # as joint speed rises. That realism matters here specifically: an
+            # implicit PD actuator delivers full torque at any velocity, which
+            # makes holding a rigid static creep pose unrealistically cheap.
+            # stiffness=25.0 / damping=0.5 are the reference Go2/A1 gains and
+            # happen to already match what this config used.
+            # effort/velocity limits stay this robot's own (10 N.m hip,
+            # 20 N.m thigh+knee, 20 rad/s) from config/robot_params.yaml rather
+            # than Go2's 23.5 N.m / 30 rad/s — those are hardware facts about
+            # this design, not tuning knobs. saturation_effort mirrors
+            # effort_limit, as in the reference.
+            "hips": DCMotorCfg(
                 joint_names_expr=[".*_hip_joint"],
                 effort_limit=10.0,
+                saturation_effort=10.0,
                 velocity_limit=20.0,
                 stiffness=25.0,
                 damping=0.5,
+                friction=0.0,
             ),
-            "legs": ImplicitActuatorCfg(
+            "legs": DCMotorCfg(
                 joint_names_expr=[".*_thigh_joint", ".*_knee_joint"],
                 effort_limit=20.0,
+                saturation_effort=20.0,
                 velocity_limit=20.0,
                 stiffness=25.0,
                 damping=0.5,
+                friction=0.0,
             ),
         },
     )
@@ -155,7 +219,12 @@ class QuadrupedSceneCfg(InteractiveSceneCfg):
 
 @configclass
 class ObservationsCfg:
-    """48-dimensional proprioceptive observation vector."""
+    """48-dimensional proprioceptive observation vector.
+
+    Verified byte-for-byte against the reference velocity task's policy
+    observation group (minus the height scanner, which is rough-terrain only):
+    same terms, same order, same noise magnitudes. Unchanged in V6.
+    """
 
     @configclass
     class PolicyCfg(ObservationGroupCfg):
@@ -205,13 +274,11 @@ class ActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=[".*_hip_joint", ".*_thigh_joint", ".*_knee_joint"],
-        # 0.25 matches A1/Go1/Walk-These-Ways action scaling for lighter (~12kg
-        # and under) quadrupeds, rather than isaaclab's ANYmal-derived default
-        # of 0.5 (ANYmal is ~30kg+ and moves proportionally slower). A smaller
-        # per-step offset window also means early random exploration produces
-        # less violent, less fall-prone motion — relevant since this robot's
-        # policy currently prefers standing still over risking a fall.
-        scale=0.25,          # NN output ∈ [−1,+1] → joint offset ∈ [−0.25, +0.25] rad
+        # 0.25 — Go2's own override of the generic 0.5, and legged_gym A1's
+        # value too. Unchanged from V5; this was already correct. What changed
+        # is the pose it offsets *from* (see _STAND_THIGH above): the same
+        # +-0.25 rad window is far more useful from a crouched stance.
+        scale=0.25,
         use_default_offset=True,
     )
 
@@ -220,28 +287,28 @@ class ActionsCfg:
 
 @configclass
 class CommandsCfg:
-    """Random body-velocity commands resampled every 10 s."""
+    """Random body-velocity commands resampled every 10 s.
+
+    Reference values throughout: +-1.0 on all three axes. V3-V5 narrowed
+    lin_vel_y to +-0.5 on the reasoning that lateral gait is harder for a
+    0.2 m-wide robot — but the reference asks +-1.0 of Go2 and gets it, so
+    that narrowing was unjustified caution. V5's velocity-command curriculum
+    is gone: no reference flat-terrain config ramps command ranges, and it
+    demonstrably did not break the creep (the V5 run reached full range at
+    iteration ~1010 and the policy simply glided faster).
+    """
 
     base_velocity = mdp.UniformVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.02,     # 2 % of envs commanded to stand still
+        rel_standing_envs=0.02,
         rel_heading_envs=1.0,
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,
-        # x/yaw at the reference +-1.0 (legged_gym A1, Isaac Lab Go2) — achievable
-        # speed scales with leg length (0.40 m here, Go1-class), not body length,
-        # so the earlier +-0.5 narrowing was over-conservative. It also created
-        # the V3 creep optimum: with the exp(-err^2/0.25) tracking kernel, a
-        # planted-feet shuffle can track <=0.4 m/s almost perfectly and even
-        # standing still under a 0.5 m/s command keeps 37% of the tracking
-        # reward. At 1.0 m/s creeping physically cannot track, so the dominant
-        # reward term itself now demands stepping. lin_vel_y stays +-0.5:
-        # lateral gait is legitimately harder for a 0.2 m-wide robot.
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
             lin_vel_x=(-1.0, 1.0),
-            lin_vel_y=(-0.5, 0.5),
+            lin_vel_y=(-1.0, 1.0),
             ang_vel_z=(-1.0, 1.0),
             heading=(-math.pi, math.pi),
         ),
@@ -253,23 +320,16 @@ class CommandsCfg:
 @configclass
 class RewardsCfg:
     """
-    Reward shaping for locomotion.
+    Reward shaping for locomotion — a direct port of Isaac Lab's Go2 flat
+    config (velocity_env_cfg.py base + config/go2 overrides, at v2.3.2).
 
-    Primary objective: track the commanded (vx, vy, wz).
-    Everything else is a penalty that discourages bad strategies (bouncing,
-    high energy use, bad posture, or falling).
-
-    Weights are aligned to Isaac Lab's own shipped Go2/A1 flat-terrain
-    configs (closest mass/action-scale match to this ~5 kg robot), read
-    directly from the local IsaacLab install rather than assumed. No
-    only-positive-rewards clamp or extra fall penalty here — neither
-    Go2, A1, nor ANYmal-C use one; falling is already penalised by losing
-    future reward through the base-contact termination below.
+    The full reference term list is exactly: two tracking rewards, five
+    stability/effort penalties, feet_air_time, undesired_contacts,
+    flat_orientation_l2, dof_pos_limits. That's it. Everything V3-V5 added on
+    top has been removed — see the module docstring.
     """
 
-    # ── Primary: velocity tracking ────────────────────────────────────────────
-    # 1.5 / 0.75 matches Unitree Go2/A1's ratio (vs. the generic ANYmal/
-    # legged_gym 1.0/0.5).
+    # ── Primary: velocity tracking (Go2 override of the 1.0/0.5 base) ────────
     track_lin_vel_xy_exp = RewardTermCfg(
         func=mdp.track_lin_vel_xy_exp,
         weight=1.5,
@@ -284,109 +344,57 @@ class RewardsCfg:
     # ── Stability penalties ───────────────────────────────────────────────────
     lin_vel_z_l2 = RewardTermCfg(func=mdp.lin_vel_z_l2, weight=-2.0)
     ang_vel_xy_l2 = RewardTermCfg(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    # Go2/A1 flat use -2.5, not ANYmal-flat's -5.0 — matching the lighter,
-    # faster-reacting robot class this one is closer to.
+    # -2.5 is the Go2/A1 *flat* override (the shared base leaves it at 0.0).
     flat_orientation_l2 = RewardTermCfg(func=mdp.flat_orientation_l2, weight=-2.5)
 
     # ── Joint health penalties ────────────────────────────────────────────────
-    # V4 claimed this "raised well above the generic -1e-5 default" at -2.5e-5,
-    # but that's only 2.5x. Checked directly against source, not assumed, this
-    # time: isaac-sim/IsaacLab's actual go2/rough_env_cfg.py override is -2e-4
-    # (20x the default), and unitreerobotics/unitree_rl_lab's independent Go2
-    # config uses the same -2e-4 — two unrelated real configs agree exactly, so
-    # V5 adopts it outright rather than splitting the difference. A torque
-    # penalty this much stronger than V3/V4 had also directly taxes the exact
-    # strategy the creep optimum was exploiting: near-zero-effort standing.
+    # -2e-4: Go2's override, and legged_gym A1's `torques` scale. Correct since V5.
     joint_torques_l2 = RewardTermCfg(func=mdp.joint_torques_l2, weight=-2.0e-4)
     joint_acc_l2 = RewardTermCfg(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    # -0.001, matching unitree_rl_lab's Go2 config exactly (not in Go2/A1's own
-    # IsaacLab configs, which omit this term). Separate from joint_acc_l2 —
-    # penalises sustained high joint speed, not just changes in it.
-    joint_vel_l2 = RewardTermCfg(func=mdp.joint_vel_l2, weight=-0.001)
     action_rate_l2 = RewardTermCfg(func=mdp.action_rate_l2, weight=-0.01)
-    # unitree_rl_lab uses -0.1 here (10x this) — deliberately NOT adopted. V4's
-    # whole direction was *loosening* restrictions that made standing still the
-    # low-risk default (see command ranges, hip regularisation); a 10x jump on
-    # action smoothness pulls the opposite way and risks re-suppressing the
-    # exploration needed to find stepping at all. Revisit only after V5 data
-    # shows action-rate cost isn't the bottleneck.
-    # dof_pos_limits: -10.0 in unitree_rl_lab; NOT present in Go2/A1's own
-    # IsaacLab configs (left at the disabled default there). Added anyway —
-    # it's a cheap safety term (joints approaching hard limits) that doesn't
-    # compete with gait shaping, so the "don't touch too many knobs" caution
-    # above doesn't apply to it the way it does to action_rate_l2.
+    # -10.0 from legged_gym A1 (Isaac Lab's own configs leave this at 0.0).
+    # Only meaningful now that soft_joint_pos_limit_factor=0.9 is set on the
+    # articulation — legged_gym pairs this weight with soft_dof_pos_limit=0.9.
     dof_pos_limits = RewardTermCfg(func=mdp.joint_pos_limits, weight=-10.0)
 
     # ── Gait quality ──────────────────────────────────────────────────────────
-    # Only penalise joint deviation while (near-)stationary — applied unconditionally
-    # it fights the leg swing a real gait needs and biases the policy toward gliding.
-    joint_deviation_l1 = RewardTermCfg(
-        func=gait_mdp.stand_still_joint_deviation_l1,
-        weight=-0.1,
-        params={"command_name": "base_velocity"},
-    )
-    # Hip abduction stays near zero in any straight-line gait, so unlike the
-    # gated all-joint term above this can run unconditionally without fighting
-    # leg swing (Walk-These-Ways-style hip regularisation). It exists to kill
-    # the V3 creep posture: legs splayed wide for a static balance polygon —
-    # nothing else penalises that while a movement command is active.
-    joint_deviation_hip_l1 = RewardTermCfg(
-        func=mdp.joint_deviation_l1,
-        weight=-0.2,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*_hip_joint")},
-    )
-    # Scoped to .*_foot_link, not .*_shin_link — with foot_link merged into
-    # shin_link, this couldn't distinguish a real foot strike from the
-    # shin/knee dragging on the ground; both looked identical to the sensor.
-    # threshold must sit BELOW the natural swing duration (~0.2s for 0.40m
-    # legs), because the term pays (air_time - threshold) at touchdown: V3's
-    # 0.3s was stride-derived, i.e. ~2x swing time, so every naturally-timed
-    # step earned a NEGATIVE reward while never stepping earned exactly 0 —
-    # the term taxed walking and subsidised the creep. (Raising the weight in
-    # V3 only raised the tax.) 0.15s keeps any real step net-positive.
+    # Reference values: weight 0.25 (Go2/A1 flat), threshold 0.5s.
+    # V3 ran 0.3s, V4 cut it to 0.15s believing the threshold was taxing
+    # walking — the reference is *higher* than either. Weight was 1.0, i.e. 4x
+    # the reference. In every working config this is a mild regulariser; gait
+    # emerges from velocity tracking against +-1.0 commands, not from here.
     feet_air_time = RewardTermCfg(
         func=gait_mdp.feet_air_time,
-        weight=1.0,
+        weight=0.25,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot_link"),
-            "threshold": 0.15,
+            "threshold": 0.5,
         },
     )
-    # Reconstructed from unitree_rl_lab's Go2 config (name + -1.0 weight only —
-    # exact source unavailable at audit time; see mdp/rewards.py docstring).
-    # Complements feet_air_time: that term makes *some* stepping pay off,
-    # this one discourages an asymmetric single-leg shuffle once stepping
-    # exists, pushing toward synced diagonal-pair timing instead.
-    feet_air_time_variance = RewardTermCfg(
-        func=gait_mdp.feet_air_time_variance,
-        weight=-1.0,
-        params={
-            "command_name": "base_velocity",
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot_link"),
-        },
-    )
-    # Penalise a planted foot sliding — this is the direct fix for the gliding exploit.
+    # The one term kept that Go2 flat doesn't have, sourced from
+    # unitreerobotics/unitree_rl_lab's Go2 velocity task (-0.1, not the -0.25
+    # V3-V5 used). Insurance against the glide this robot has repeatedly found;
+    # the reference friction restored below should make it unnecessary, but it
+    # is cheap and directly targets the known failure mode.
     feet_slide = RewardTermCfg(
         func=gait_mdp.feet_slide,
-        weight=-0.25,
+        weight=-0.1,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot_link"),
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot_link"),
         },
     )
-    # Thigh contact was always undesired. Shin contact now is too — foot_link
-    # is its own body (see feet_air_time above), so shin_link touching the
-    # ground can only mean knee-dragging, not a legitimate foot strike.
-    # Go2/A1 disable this term entirely; kept here since this robot has
-    # previously exploited crawling on its thighs without it.
+    # Thigh only, per the reference base config. V3-V5 also covered
+    # .*_shin_link, which penalises the deep leg flexion a real gait needs —
+    # a plausible contributor to the policy keeping its legs stiff and straight.
+    # (Go2 disables this term outright; kept at the base config's -1.0 because
+    # this robot has previously exploited crawling on its thighs.)
     undesired_contacts = RewardTermCfg(
         func=mdp.undesired_contacts,
         weight=-1.0,
         params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces", body_names=[".*_thigh_link", ".*_shin_link"]
-            ),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_thigh_link"),
             "threshold": 1.0,
         },
     )
@@ -415,121 +423,72 @@ class TerminationsCfg:
 @configclass
 class EventCfg:
     """
-    Domain randomisation for sim-to-real transfer.
+    Domain randomisation, aligned to the reference Go2 flat task.
 
-    Startup events fire once when the env is created.
-    Reset events fire at the start of every episode.
-    Interval events fire periodically during an episode.
+    Go2 deliberately runs *less* randomisation than V3-V5 did: no joint-reset
+    scaling, no COM offset, no pushes. That was worth knowing — the creep was
+    never an under-exploration problem, so the V4 theory that over-hard
+    randomisation "rewarded conservative wide stances" had it backwards too.
+    The aggressive settings can come back for sim-to-real once a gait exists;
+    they are noise while the base behaviour is still wrong.
     """
 
-    # Randomise floor friction — the biggest sim-to-real gap for locomotion.
+    # Fixed 0.8 static / 0.6 dynamic — the reference values, and the most
+    # important change in this class. V3-V5 randomised over (0.4, 0.9): the
+    # low end is an ice-like floor on which the planted-foot glide is nearly
+    # free, so the environment itself was subsidising the failure mode.
+    # Friction randomisation belongs back here for sim-to-real, but centred
+    # well above 0.4.
     physics_material = EventTermCfg(
         func=mdp.randomize_rigid_body_material,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.4, 0.9),
-            "dynamic_friction_range": (0.4, 0.9),
+            "static_friction_range": (0.8, 0.8),
+            "dynamic_friction_range": (0.6, 0.6),
             "restitution_range": (0.0, 0.0),
             "num_buckets": 64,
         },
     )
 
-    # ±0.5 kg payload variation (simulates carrying a sensor package)
+    # Go2 uses (-1.0, 3.0) kg on a ~15 kg robot. Scaled to this ~5 kg body,
+    # keeping the reference's asymmetry (payload is added far more often than
+    # removed): -0.35 to +1.0 kg.
     add_base_mass = EventTermCfg(
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
-            "mass_distribution_params": (-0.5, 0.5),
+            "mass_distribution_params": (-0.35, 1.0),
             "operation": "add",
         },
     )
 
-    # Randomise base COM offset — a real robot's COM never sits exactly at the
-    # URDF-nominal point once wiring/battery/sensors are added. ±0.03m xy, not
-    # ANYmal's ±0.05m: that reference value is 12.5% of this 0.4m body's length
-    # (vs ~7% of ANYmal's) — disproportionately hard randomisation rewards
-    # conservative wide-stance balancing, i.e. it pushed toward the creep.
-    randomize_base_com = EventTermCfg(
-        func=mdp.randomize_rigid_body_com,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
-            "com_range": {"x": (-0.03, 0.03), "y": (-0.03, 0.03), "z": (-0.01, 0.01)},
-        },
-    )
-
-    # Random initial pose at episode start (position + yaw, small velocity)
+    # Reference base ranges: pose x/y +-0.5 and full yaw, all six velocity
+    # components +-0.5. V3-V5 used roughly half this on the velocities.
     reset_base = EventTermCfg(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
             "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-math.pi, math.pi)},
             "velocity_range": {
-                "x": (-0.2, 0.2), "y": (-0.2, 0.2), "z": (-0.1, 0.1),
-                "roll": (-0.2, 0.2), "pitch": (-0.2, 0.2), "yaw": (-0.2, 0.2),
+                "x": (-0.5, 0.5), "y": (-0.5, 0.5), "z": (-0.5, 0.5),
+                "roll": (-0.5, 0.5), "pitch": (-0.5, 0.5), "yaw": (-0.5, 0.5),
             },
         },
     )
 
-    # Randomise joint start angles (keeps the policy robust to leg positions)
+    # (1.0, 1.0) — Go2's override, i.e. every episode starts in the exact
+    # default stance. V3-V5 scaled joint angles by (0.85, 1.15).
     reset_robot_joints = EventTermCfg(
         func=mdp.reset_joints_by_scale,
         mode="reset",
-        params={"position_range": (0.85, 1.15), "velocity_range": (0.0, 0.0)},
+        params={"position_range": (1.0, 1.0), "velocity_range": (0.0, 0.0)},
     )
 
-    # Random push every 10–15 s (tests balance recovery)
-    push_robot = EventTermCfg(
-        func=mdp.push_by_setting_velocity,
-        mode="interval",
-        interval_range_s=(10.0, 15.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
-    )
-
-
-# ── Curriculum ────────────────────────────────────────────────────────────────
-
-@configclass
-class CurriculumCfg:
-    """Velocity-command range curriculum — see mdp/curriculums.py for the full
-    rationale (short version: a static full-width range either lets creeping
-    track it, or drowns early random-policy exploration in untrackable
-    commands; ramping from an easy range to the hard one avoids both)."""
-
-    command_ranges = CurriculumTermCfg(
-        func=gait_mdp.command_ranges_curriculum,
-        params={
-            "command_name": "base_velocity",
-            # Inside these, a planted-feet creep can still track reasonably
-            # well (README V3 root-cause point 2) — an easy, learnable target
-            # for a near-random early-training policy.
-            "initial_ranges": {
-                "lin_vel_x": (-0.3, 0.3),
-                "lin_vel_y": (-0.3, 0.3),
-                "ang_vel_z": (-0.3, 0.3),
-            },
-            # Matches CommandsCfg.base_velocity.ranges — the range creeping
-            # provably cannot track.
-            "final_ranges": {
-                "lin_vel_x": (-1.0, 1.0),
-                "lin_vel_y": (-0.5, 0.5),
-                "ang_vel_z": (-1.0, 1.0),
-            },
-            # common_step_counter units = policy steps (env.step() calls), not
-            # PPO iterations. num_steps_per_env=24 (rsl_rl_ppo_cfg.py) means
-            # 1 iteration ≈ 24 steps, so this is roughly:
-            #   iterations 0-300   → initial_ranges (matches Go2Flat's own
-            #                        max_iterations=300 — the runway Go2 gets
-            #                        to find basic locomotion before anything
-            #                        harder is asked of it)
-            #   iterations 300-1000 → linear ramp to final_ranges
-            #   iterations 1000+    → final_ranges
-            "warmup_steps": 24 * 300,
-            "ramp_steps": 24 * 700,
-        },
-    )
+    # NOTE: Go2 disables `push_robot` and `base_com` randomisation entirely,
+    # so both are absent here (V3-V5 had them). Re-add for balance robustness
+    # and sim-to-real once a gait has actually emerged.
 
 
 # ── Top-level environment config ──────────────────────────────────────────────
@@ -539,7 +498,7 @@ class QuadrupedFlatEnvCfg(ManagerBasedRLEnvCfg):
     """
     Flat-terrain locomotion environment for the 5 kg quadruped.
 
-    Key timing:
+    Key timing (all reference values):
       sim.dt      = 0.005 s  → physics at 200 Hz
       decimation  = 4        → policy runs at  50 Hz
       episode     = 20 s     → 1000 policy steps per episode
@@ -552,7 +511,6 @@ class QuadrupedFlatEnvCfg(ManagerBasedRLEnvCfg):
     rewards:      RewardsCfg        = RewardsCfg()
     terminations: TerminationsCfg   = TerminationsCfg()
     events:       EventCfg          = EventCfg()
-    curriculum:   CurriculumCfg     = CurriculumCfg()
 
     def __post_init__(self) -> None:
         super().__post_init__()

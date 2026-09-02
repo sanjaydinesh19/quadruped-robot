@@ -78,10 +78,9 @@ src/
     leg.py                   # analytical FK + IK for a single 3-DOF leg
   simulation/
     isaac_lab/
-      quadruped_env_cfg.py   # full ManagerBasedRLEnvCfg (scene, obs, rewards, events, curriculum)
+      quadruped_env_cfg.py   # full ManagerBasedRLEnvCfg (scene, obs, rewards, events)
       mdp/
-        rewards.py            # vendored/custom reward terms (feet_air_time, feet_slide, ...)
-        curriculums.py        # velocity-command range curriculum (V5)
+        rewards.py            # feet_air_time + feet_slide, vendored from isaaclab_tasks
       agents/
         rsl_rl_ppo_cfg.py    # PPO hyperparameters (RSL-RL actor/critic split API)
 
@@ -267,8 +266,11 @@ Penalties discourage bouncing, high energy use, thigh ground contacts, and falli
 sliding — vendored in `src/simulation/isaac_lab/mdp/` since isaaclab 2.3.x's core
 `mdp` module doesn't ship them (they're locomotion-task-specific upstream).
 
-**Domain randomisation:** floor friction, base mass ±0.5 kg, random episode reset,
-random pushes every 10–15 s.
+**Domain randomisation:** fixed reference friction (0.8 static / 0.6 dynamic), base
+mass −0.35/+1.0 kg, random episode reset pose and velocity. As of V6 this matches the
+reference Go2 flat task, which deliberately randomises *less* than V3–V5 did — COM
+offset, joint-reset scaling, and periodic pushes are all disabled upstream and so are
+disabled here. They belong back in for sim-to-real once a gait actually exists.
 
 ---
 
@@ -287,11 +289,13 @@ meaning the policy settled on a static/creeping solution rather than an alternat
 Root cause (full audit, corrected from the earlier "raise the weights" hypothesis —
 V3 already raised `feet_air_time` 0.25 → 1.0 and it changed nothing):
 
-1. **`feet_air_time` taxed walking.** The term pays `(air_time − threshold)` at
-   touchdown. The 0.3 s threshold was stride-derived, but swing time for 0.40 m legs
-   is ~0.2 s — so every naturally-timed step earned a *negative* reward, while never
-   stepping earned exactly 0. Raising the weight only raised the tax. This is why the
-   term stayed negative and flat all run.
+1. ~~**`feet_air_time` taxed walking.**~~ **Later falsified — see V6.** The claim was
+   that the 0.3 s threshold exceeded the ~0.2 s natural swing time, making every step
+   net-negative. The reference config uses **0.5 s** with a small weight and produces a
+   gait, so a high threshold is not what blocks stepping; this term is a mild regulariser
+   everywhere it appears. Acting on this reading (V4 cut the threshold to 0.15 s and V3
+   had already raised the weight to 1.0, 4× the reference) moved the config *away* from
+   the working baseline.
 2. **Commands were trackable without stepping.** With commands capped at ±0.5 m/s and
    the standard `exp(−err²/0.25)` kernel, a planted-feet creep tracks almost perfectly
    (even standing still keeps 37 % of tracking reward under the worst-case command).
@@ -348,7 +352,49 @@ Also not adopted: unitree_rl_lab's `energy` term (torque×velocity power penalty
 with the now-corrected `joint_torques_l2`) and its scaled (rather than gated) stand-still
 penalty — both reasonable, but out of scope for one review pass; noted here for a future one.
 
-V5 has not been trained yet — it's a code-level redesign pending a RunPod run.
+**V5 result: trained ~1800 iterations on an RTX 4090, and the creep survived.** Tracking
+stayed excellent (`track_lin_vel_xy_exp` ≈ 1.44/1.5, `error_vel_xy` ≈ 0.16) but
+`feet_air_time` never went positive (−0.008 → −0.004) and `feet_air_time_variance` never
+moved off ≈0 — no stepping, ever. The command curriculum did run correctly (it reached
+full ±1.0 range at iteration ~1010, confirmed by `Curriculum/command_ranges = 1.0`), and
+the policy did visibly react to the pressure — `error_vel_xy` spiked, action noise std
+rose 0.10 → 0.19, `feet_slide` worsened by 70 %. But by iteration 1775 everything had
+settled back: the policy absorbed the harder commands by **gliding faster**, not by
+stepping. Run stopped early; the curriculum lever had been fully pulled with no reversal
+in 765 iterations.
+
+**V6** (stop inventing — port the reference verbatim):
+
+Walking quadrupeds are a solved problem, so V6 discards the accumulated custom reasoning
+and makes the config a faithful port of Isaac Lab's own **Go2 flat-terrain velocity task**
+(`velocity_env_cfg.py` + `config/go2`, read at the **v2.3.2** tag this project pins),
+cross-checked against `legged_gym`'s A1. Deviations from the reference now require a
+geometry-based reason, written down at the point of deviation.
+
+Reading the reference source falsified several things V3–V5 had asserted confidently:
+
+| Thing | V3–V5 | Reference | What we got wrong |
+|---|---|---|---|
+| `feet_air_time.threshold` | 0.3 → **0.15** | **0.5** | V4 "root-caused" the creep to this threshold taxing walking and *lowered* it. The reference is **higher than the value V4 called the bug.** The whole V4 analysis was backwards |
+| `feet_air_time.weight` | 1.0 | **0.25** | 4× too high. In every working config this is a mild regulariser — gait comes from velocity tracking, not from here |
+| Floor friction | randomised **(0.4, 0.9)** | fixed **0.8 / 0.6** | The low end is an ice-rink. **The environment itself was subsidising the glide** — likely the single biggest enabler |
+| Default stance | thigh 0.644, knee −1.345 (near-straight) | thigh **0.8**, calf **−1.5** (deep crouch) | Actions are ±0.25 rad offsets *from this pose*. From a straight-legged stance the robot **physically could not swing a leg**, whatever the reward said |
+| `undesired_contacts` | thigh **+ shin** | thigh only (Go2: disabled) | Penalising shin contact discourages the deep flexion a gait needs |
+| `soft_joint_pos_limit_factor` | never set (→1.0) | **0.9** | Made `dof_pos_limits` a near-no-op (logged ≈ −0.0001 all run) |
+| Actuator model | `ImplicitActuatorCfg` | `DCMotorCfg` | Implicit PD gives full torque at any joint speed, making a rigid static creep unrealistically cheap to hold |
+| Extra reward terms | `joint_deviation_hip_l1` (−0.2, always-on), `stand_still_joint_deviation_l1`, `feet_air_time_variance` (−1.0), `joint_vel_l2`, command curriculum | none of them exist | All invented or second-hand. The always-on hip penalty directly opposed the hip motion a gait needs. All removed |
+| `lin_vel_y` command | ±0.5 | **±1.0** | Unjustified caution — the reference asks ±1.0 of Go2 and gets it |
+| DR (COM, joint reset, pushes) | all enabled, aggressive | Go2 **disables all three** | The creep was never an under-exploration problem, so V4's "over-hard DR caused it" theory was also backwards |
+
+Kept deliberately against the reference, both documented in-code: `undesired_contacts`
+at −1.0 on thighs (Go2 disables it; this robot has previously exploited thigh-crawling)
+and `feet_slide` at −0.1 (unitree_rl_lab's value — insurance against the known failure
+mode, though restored friction should make it redundant). Unchanged and already correct:
+the 48-dim observation set including noise magnitudes (verified an exact match), action
+scale 0.25, tracking weights 1.5/0.75, `joint_torques_l2` −2e-4, timing (200 Hz physics /
+50 Hz policy / 20 s episodes), and the PPO hyperparameters and `[128,128,128]` network.
+
+V6 is code-complete and lint-clean but **not yet trained** — pending a RunPod run.
 
 ---
 
@@ -362,7 +408,7 @@ V5 has not been trained yet — it's a code-level redesign pending a RunPod run.
 | RViz2 visualisation | Done |
 | USD asset | Done |
 | Isaac Lab env (flat terrain) | Done |
-| RL training (flat terrain) | V5 redesign ready (V4 + real-repo audit fixes + command curriculum) — retraining pending |
+| RL training (flat terrain) | V6 ready — V5 trained and still crept; config re-ported verbatim from Isaac Lab's Go2 flat task. Retraining pending |
 | Rough terrain curriculum | Not started |
 | ROS2 controllers | Not started |
 | Hardware bring-up | Not started |

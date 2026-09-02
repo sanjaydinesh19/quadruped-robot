@@ -214,7 +214,7 @@ _SCREW_LENGTH = 0.004
 def _motor_disc_radius(effort_nm: float) -> float:
     """Pancake QDD motor housing radius, scaled from the joint's rated torque
     (purely cosmetic: real MIT-Cheetah/Unitree-style QDD actuators visibly
-    grow with torque rating). Does not touch the ImplicitActuatorCfg
+    grow with torque rating). Does not touch the DCMotorCfg
     effort_limit actually enforced in sim — that still comes from
     robot_params.yaml via quadruped_env_cfg.py."""
     return 0.030 * math.sqrt(effort_nm / 10.0)
