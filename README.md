@@ -60,7 +60,7 @@ range, not a BOM to check out with.
 
 | Layer | Tool |
 |---|---|
-| RL training | NVIDIA Isaac Lab main + RSL-RL / PPO |
+| RL training | NVIDIA Isaac Lab v2.3.2 (pinned, matches the container tag) + RSL-RL / PPO |
 | Physics sim | Isaac Sim (PhysX GPU) via `nvcr.io/nvidia/isaac-lab:2.3.2` |
 | Visualisation | RViz2, TensorBoard |
 | Middleware | ROS2 Jazzy |

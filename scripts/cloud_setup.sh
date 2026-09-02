@@ -11,7 +11,7 @@
 #   cd Quadruped && bash scripts/cloud_setup.sh
 #
 # What it does:
-#   1. Clones Isaac Lab main → /workspace/isaaclab  (skips if already present)
+#   1. Clones Isaac Lab v2.3.2 → /workspace/isaaclab  (skips if already present)
 #   2. Links /isaac-sim into the Isaac Lab tree
 #   3. Installs Isaac Lab Python extensions into the Kit Python
 #   4. Generates the URDF
@@ -30,11 +30,19 @@ echo " IsaacLab: $ISAACLAB_PATH"
 echo "════════════════════════════════════════════════════════"
 
 # ── 1. Clone Isaac Lab ────────────────────────────────────────────────────────
+# Pinned to the v2.3.2 tag — MUST match the container image tag
+# (nvcr.io/nvidia/isaac-lab:2.3.2), not left floating on main. main has since
+# moved past this container's bundled Isaac Sim / Kit Python (3.11.13): its
+# isaaclab core package now declares a Python floor the 2.3.2 container can't
+# satisfy, which surfaces as
+#   ERROR: Package 'isaaclab' requires a different Python: 3.11.13 not in '>=3.12'
+# during `isaaclab.sh --install` if main is cloned instead of the matching tag.
+ISAACLAB_REF="${ISAACLAB_REF:-v2.3.2}"
 if [ -d "$ISAACLAB_PATH/.git" ]; then
   echo "[1/4] Isaac Lab already cloned — skipping"
 else
-  echo "[1/4] Cloning Isaac Lab (main)..."
-  git clone https://github.com/isaac-sim/IsaacLab.git "$ISAACLAB_PATH"
+  echo "[1/4] Cloning Isaac Lab ($ISAACLAB_REF)..."
+  git clone --branch "$ISAACLAB_REF" --depth 1 https://github.com/isaac-sim/IsaacLab.git "$ISAACLAB_PATH"
 fi
 
 # ── 2. Link /isaac-sim into the Isaac Lab tree ───────────────────────────────
