@@ -1,16 +1,23 @@
 """
-RSL-RL PPO configuration for the quadruped flat-terrain task (rsl_rl >= 4.0.0 API).
+RSL-RL PPO configuration for the quadruped flat-terrain task.
 
-isaaclab_rl 0.5.x / rsl_rl 4.x replaced the monolithic RslRlPpoActorCriticCfg
-with separate RslRlMLPModelCfg for actor and critic, and removed use_clipping /
-clip_param from the algorithm config in favour of use_clipped_value_loss.
+Targets the API actually shipped in the pinned container
+(nvcr.io/nvidia/isaac-lab:2.3.2 → isaaclab_rl==0.4.7): a single monolithic
+RslRlPpoActorCriticCfg (one policy config carrying both actor_hidden_dims
+and critic_hidden_dims), not the later split RslRlMLPModelCfg actor/critic
+pair from isaaclab_rl 0.5.x+.
+
+This file previously assumed the split API and failed at import time on the
+real container:
+    ImportError: cannot import name 'RslRlMLPModelCfg' from 'isaaclab_rl.rsl_rl'
+That assumption was never checked against the actual pinned container, only
+inferred. Corrected here directly against isaaclab_tasks'
+config/go2/agents/rsl_rl_ppo_cfg.py read at the v2.3.2 tag specifically (not
+main, which is a different, newer API) — same reference Isaac Lab config this
+project's reward/PPO values have been cross-checked against elsewhere.
 """
 from isaaclab.utils import configclass
-from isaaclab_rl.rsl_rl import (
-    RslRlMLPModelCfg,
-    RslRlOnPolicyRunnerCfg,
-    RslRlPpoAlgorithmCfg,
-)
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 
 
 @configclass
@@ -23,26 +30,21 @@ class QuadrupedPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     experiment_name: str = "quadruped_flat"
     empirical_normalization: bool = False
 
-    # Map env observation groups → algorithm observation sets.
-    # Our env exposes a single "policy" group; both actor and critic see it.
-    obs_groups = {"actor": ["policy"], "critic": ["policy"]}
-
-    # Actor: stochastic MLP with Gaussian output (mean + fixed std).
+    # Single monolithic actor+critic MLP (0.4.7 API has no separate actor/
+    # critic model classes — both hidden-dim lists live on one config).
     # [128,128,128] matches Isaac Lab's own Go2Flat/A1Flat/AnymalCFlat configs
     # (their *rough*-terrain configs use the larger [512,256,128] — we're
     # flat-only, so the smaller/faster-converging network is the right match).
-    actor = RslRlMLPModelCfg(
-        hidden_dims=[128, 128, 128],
-        activation="elu",
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(
-            init_std=1.0,
-            std_type="scalar",
-        ),
-    )
-
-    # Critic: deterministic value MLP (no distribution needed).
-    critic = RslRlMLPModelCfg(
-        hidden_dims=[128, 128, 128],
+    # Go2's own v2.3.2 reference config doesn't set obs_groups either — the
+    # framework fills it in from the env's observation groups when absent.
+    policy = RslRlPpoActorCriticCfg(
+        class_name="ActorCritic",
+        init_noise_std=1.0,
+        noise_std_type="scalar",
+        actor_obs_normalization=False,
+        critic_obs_normalization=False,
+        actor_hidden_dims=[128, 128, 128],
+        critic_hidden_dims=[128, 128, 128],
         activation="elu",
     )
 

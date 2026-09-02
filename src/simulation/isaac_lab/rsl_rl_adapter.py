@@ -1,12 +1,26 @@
 """
-Adapter between isaaclab_rl's actor/critic RSL-RL config and the container's
-rsl_rl runner, which expects a single "policy" key (ActorCritic) and a
-narrower set of algorithm kwargs.
+Adapter between isaaclab_rl's RSL-RL runner config and the container's
+rsl_rl.runners.OnPolicyRunner, which reads a plain dict with "policy" and
+"algorithm" keys off `train_cfg`.
 
-Needed because isaaclab_rl 0.5.x split RslRlPpoActorCriticCfg into separate
-actor/critic RslRlMLPModelCfg objects, but the pinned container's rsl_rl
-(OnPolicyRunner) predates that split. Shared by train_rl.py, play_rl.py, and
-watch_rl.py so the API-mismatch fixes only need to happen in one place.
+Earlier versions of this file (and agents/rsl_rl_ppo_cfg.py) assumed the
+pinned container shipped isaaclab_rl 0.5.x+'s split actor/critic API
+(RslRlMLPModelCfg) paired with an rsl_rl runner that predated the split, and
+manually reconstructed a "policy" dict from separate "actor"/"critic" dicts
+to bridge the two. That assumption was never actually checked against the
+container and was wrong: the container pins isaaclab_rl==0.4.7, which still
+uses the older monolithic RslRlPpoActorCriticCfg (see rsl_rl_ppo_cfg.py) —
+found only once `from isaaclab_rl.rsl_rl import RslRlMLPModelCfg` failed at
+import time with `ImportError: cannot import name 'RslRlMLPModelCfg'`. With
+the monolithic config, `runner_cfg.to_dict()` already produces a correctly
+shaped "policy" key natively — no actor/critic merging needed anymore.
+
+What's still real and still handled here: RslRlPpoAlgorithmCfg carries fields
+(rnd_cfg, symmetry_cfg, optimizer, share_cnn_encoders, ...) that this
+container's exact pinned rsl_rl PPO constructor may not accept as kwargs, so
+the algorithm dict is still filtered defensively. Shared by train_rl.py,
+play_rl.py, and watch_rl.py so any future API-mismatch fix only needs to
+happen in one place.
 """
 from __future__ import annotations
 
@@ -25,17 +39,6 @@ _VALID_ALG_KWARGS = {
 def build_runner_cfg_dict(runner_cfg: Any) -> dict:
     """Convert a QuadrupedPPORunnerCfg into the dict shape OnPolicyRunner expects."""
     runner_cfg_dict = runner_cfg.to_dict()
-
-    actor = runner_cfg_dict.get("actor") or {}
-    critic = runner_cfg_dict.get("critic") or {}
-    dist = actor.get("distribution_cfg") or {}
-    runner_cfg_dict["policy"] = {
-        "class_name": "ActorCritic",
-        "actor_hidden_dims": actor.get("hidden_dims", [512, 256, 128]),
-        "critic_hidden_dims": critic.get("hidden_dims", [512, 256, 128]),
-        "activation": actor.get("activation", "elu"),
-        "init_noise_std": (dist.get("init_std") if isinstance(dist, dict) else 1.0) or 1.0,
-    }
 
     if isinstance(runner_cfg_dict.get("algorithm"), dict):
         runner_cfg_dict["algorithm"] = {
