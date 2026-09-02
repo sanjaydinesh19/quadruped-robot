@@ -38,11 +38,19 @@ echo "════════════════════════�
 #   ERROR: Package 'isaaclab' requires a different Python: 3.11.13 not in '>=3.12'
 # during `isaaclab.sh --install` if main is cloned instead of the matching tag.
 ISAACLAB_REF="${ISAACLAB_REF:-v2.3.2}"
+# -c http.version=HTTP/1.1: some RunPod pods' network path silently 401s the
+# HTTP/2 POST /git-upload-pack request github.com's smart-HTTP protocol sends
+# for the object negotiation (the anonymous GET /info/refs still succeeds —
+# only the follow-up POST fails), which otherwise makes an anonymous clone of
+# a fully public repo prompt for (and then reject) credentials. Confirmed by
+# forcing HTTP/1.1 as a workaround; root cause sits below git/curl, in the
+# pod's network stack, so pin the protocol rather than debug it per-pod.
 if [ -d "$ISAACLAB_PATH/.git" ]; then
   echo "[1/4] Isaac Lab already cloned — skipping"
 else
   echo "[1/4] Cloning Isaac Lab ($ISAACLAB_REF)..."
-  git clone --branch "$ISAACLAB_REF" --depth 1 https://github.com/isaac-sim/IsaacLab.git "$ISAACLAB_PATH"
+  git -c http.version=HTTP/1.1 clone --branch "$ISAACLAB_REF" --depth 1 \
+    https://github.com/isaac-sim/IsaacLab.git "$ISAACLAB_PATH"
 fi
 
 # ── 2. Link /isaac-sim into the Isaac Lab tree ───────────────────────────────
