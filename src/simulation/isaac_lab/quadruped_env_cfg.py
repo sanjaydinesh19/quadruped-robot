@@ -40,6 +40,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import (
+    CurriculumTermCfg,
     EventTermCfg,
     ObservationGroupCfg,
     ObservationTermCfg,
@@ -288,10 +289,33 @@ class RewardsCfg:
     flat_orientation_l2 = RewardTermCfg(func=mdp.flat_orientation_l2, weight=-2.5)
 
     # ── Joint health penalties ────────────────────────────────────────────────
-    # Go2/A1 raise this well above the generic -1e-5 default on flat terrain.
-    joint_torques_l2 = RewardTermCfg(func=mdp.joint_torques_l2, weight=-2.5e-5)
+    # V4 claimed this "raised well above the generic -1e-5 default" at -2.5e-5,
+    # but that's only 2.5x. Checked directly against source, not assumed, this
+    # time: isaac-sim/IsaacLab's actual go2/rough_env_cfg.py override is -2e-4
+    # (20x the default), and unitreerobotics/unitree_rl_lab's independent Go2
+    # config uses the same -2e-4 — two unrelated real configs agree exactly, so
+    # V5 adopts it outright rather than splitting the difference. A torque
+    # penalty this much stronger than V3/V4 had also directly taxes the exact
+    # strategy the creep optimum was exploiting: near-zero-effort standing.
+    joint_torques_l2 = RewardTermCfg(func=mdp.joint_torques_l2, weight=-2.0e-4)
     joint_acc_l2 = RewardTermCfg(func=mdp.joint_acc_l2, weight=-2.5e-7)
+    # -0.001, matching unitree_rl_lab's Go2 config exactly (not in Go2/A1's own
+    # IsaacLab configs, which omit this term). Separate from joint_acc_l2 —
+    # penalises sustained high joint speed, not just changes in it.
+    joint_vel_l2 = RewardTermCfg(func=mdp.joint_vel_l2, weight=-0.001)
     action_rate_l2 = RewardTermCfg(func=mdp.action_rate_l2, weight=-0.01)
+    # unitree_rl_lab uses -0.1 here (10x this) — deliberately NOT adopted. V4's
+    # whole direction was *loosening* restrictions that made standing still the
+    # low-risk default (see command ranges, hip regularisation); a 10x jump on
+    # action smoothness pulls the opposite way and risks re-suppressing the
+    # exploration needed to find stepping at all. Revisit only after V5 data
+    # shows action-rate cost isn't the bottleneck.
+    # dof_pos_limits: -10.0 in unitree_rl_lab; NOT present in Go2/A1's own
+    # IsaacLab configs (left at the disabled default there). Added anyway —
+    # it's a cheap safety term (joints approaching hard limits) that doesn't
+    # compete with gait shaping, so the "don't touch too many knobs" caution
+    # above doesn't apply to it the way it does to action_rate_l2.
+    dof_pos_limits = RewardTermCfg(func=mdp.joint_pos_limits, weight=-10.0)
 
     # ── Gait quality ──────────────────────────────────────────────────────────
     # Only penalise joint deviation while (near-)stationary — applied unconditionally
@@ -327,6 +351,19 @@ class RewardsCfg:
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot_link"),
             "threshold": 0.15,
+        },
+    )
+    # Reconstructed from unitree_rl_lab's Go2 config (name + -1.0 weight only —
+    # exact source unavailable at audit time; see mdp/rewards.py docstring).
+    # Complements feet_air_time: that term makes *some* stepping pay off,
+    # this one discourages an asymmetric single-leg shuffle once stepping
+    # exists, pushing toward synced diagonal-pair timing instead.
+    feet_air_time_variance = RewardTermCfg(
+        func=gait_mdp.feet_air_time_variance,
+        weight=-1.0,
+        params={
+            "command_name": "base_velocity",
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot_link"),
         },
     )
     # Penalise a planted foot sliding — this is the direct fix for the gliding exploit.
@@ -452,6 +489,49 @@ class EventCfg:
     )
 
 
+# ── Curriculum ────────────────────────────────────────────────────────────────
+
+@configclass
+class CurriculumCfg:
+    """Velocity-command range curriculum — see mdp/curriculums.py for the full
+    rationale (short version: a static full-width range either lets creeping
+    track it, or drowns early random-policy exploration in untrackable
+    commands; ramping from an easy range to the hard one avoids both)."""
+
+    command_ranges = CurriculumTermCfg(
+        func=gait_mdp.command_ranges_curriculum,
+        params={
+            "command_name": "base_velocity",
+            # Inside these, a planted-feet creep can still track reasonably
+            # well (README V3 root-cause point 2) — an easy, learnable target
+            # for a near-random early-training policy.
+            "initial_ranges": {
+                "lin_vel_x": (-0.3, 0.3),
+                "lin_vel_y": (-0.3, 0.3),
+                "ang_vel_z": (-0.3, 0.3),
+            },
+            # Matches CommandsCfg.base_velocity.ranges — the range creeping
+            # provably cannot track.
+            "final_ranges": {
+                "lin_vel_x": (-1.0, 1.0),
+                "lin_vel_y": (-0.5, 0.5),
+                "ang_vel_z": (-1.0, 1.0),
+            },
+            # common_step_counter units = policy steps (env.step() calls), not
+            # PPO iterations. num_steps_per_env=24 (rsl_rl_ppo_cfg.py) means
+            # 1 iteration ≈ 24 steps, so this is roughly:
+            #   iterations 0-300   → initial_ranges (matches Go2Flat's own
+            #                        max_iterations=300 — the runway Go2 gets
+            #                        to find basic locomotion before anything
+            #                        harder is asked of it)
+            #   iterations 300-1000 → linear ramp to final_ranges
+            #   iterations 1000+    → final_ranges
+            "warmup_steps": 24 * 300,
+            "ramp_steps": 24 * 700,
+        },
+    )
+
+
 # ── Top-level environment config ──────────────────────────────────────────────
 
 @configclass
@@ -472,6 +552,7 @@ class QuadrupedFlatEnvCfg(ManagerBasedRLEnvCfg):
     rewards:      RewardsCfg        = RewardsCfg()
     terminations: TerminationsCfg   = TerminationsCfg()
     events:       EventCfg          = EventCfg()
+    curriculum:   CurriculumCfg     = CurriculumCfg()
 
     def __post_init__(self) -> None:
         super().__post_init__()

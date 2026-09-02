@@ -78,7 +78,10 @@ src/
     leg.py                   # analytical FK + IK for a single 3-DOF leg
   simulation/
     isaac_lab/
-      quadruped_env_cfg.py   # full ManagerBasedRLEnvCfg (scene, obs, rewards, events)
+      quadruped_env_cfg.py   # full ManagerBasedRLEnvCfg (scene, obs, rewards, events, curriculum)
+      mdp/
+        rewards.py            # vendored/custom reward terms (feet_air_time, feet_slide, ...)
+        curriculums.py        # velocity-command range curriculum (V5)
       agents/
         rsl_rl_ppo_cfg.py    # PPO hyperparameters (RSL-RL actor/critic split API)
 
@@ -316,6 +319,37 @@ flat-terrain configs — the bottomed-out adaptive LR was a symptom of convergen
 a cause). No base-height penalty, foot-clearance reward, or gait/phase clock was added:
 the first fights natural gait oscillation and the last two hard-code a specific gait.
 
+**V5** (cross-checked against real open-source Isaac Lab quadruped repos — the official
+[isaac-sim/IsaacLab](https://github.com/isaac-sim/IsaacLab) Go2/A1 flat & rough configs,
+and [unitreerobotics/unitree_rl_lab](https://github.com/unitreerobotics/unitree_rl_lab),
+Unitree's own actively-maintained IsaacLab RL repo for Go2/H1/G1 — fetched and read
+directly rather than assumed, since V4's "already aligned to Go2/A1" claim for
+`joint_torques_l2` turned out to be wrong by 8x once actually checked):
+
+| Change | V4 | V5 | Rationale |
+|---|---|---|---|
+| `joint_torques_l2` | −2.5e-5 | −2.0e-4 | V4's comment claimed this matched Go2/A1; it didn't. Go2's real `rough_env_cfg.py` override *and* unitree_rl_lab's independent Go2 config both use −2e-4 (20x the generic default) — two unrelated real configs agree exactly. Also directly taxes near-zero-effort standing, the exact strategy the creep optimum exploits |
+| `joint_vel_l2` | — | −0.001 | New term (unitree_rl_lab). Penalises sustained joint speed, not just its rate of change (`joint_acc_l2`'s job) |
+| `dof_pos_limits` | — | −10.0 | New term (unitree_rl_lab; `isaaclab.envs.mdp.joint_pos_limits`, already available core-side). Cheap safety term, doesn't compete with gait shaping |
+| `feet_air_time_variance` | — | −1.0 | New term, reconstructed from unitree_rl_lab's name+weight (exact source unavailable). Penalises uneven air time across the 4 feet — doesn't fix zero-stepping by itself (a creep's air times are all ~0, so variance is too), but once `feet_air_time` gets stepping started, this discourages an asymmetric single-leg shuffle in favour of synced diagonal-pair timing |
+| Velocity-command **curriculum** | static ±1.0 range from iteration 0 | ramps ±0.3 → ±1.0 over iterations 300–1000 | Inspired by unitree_rl_lab's `lin_vel_cmd_levels`. A more principled fix than V4's static widening: full-width from the start either lets creeping track it (too narrow) or drowns a near-random early policy in an untrackable target (too wide, no exploration signal). Ramping gives early PPO an easy, learnable range, then raises the bar to the creep-defeating ±1.0 range only once basic locomotion competence exists. Implemented in `mdp/curriculums.py` |
+
+Checked and confirmed already correct (no change): `track_lin_vel_xy_exp`/`track_ang_vel_z_exp`
+(1.5/0.75 — exact match to Go2's real override, not just the ratio as V4 assumed),
+`action_rate_l2`, `flat_orientation_l2`, `ang_vel_xy_l2`, `lin_vel_z_l2`, action `scale=0.25`,
+`joint_acc_l2`, PPO hyperparameters and `[128,128,128]` network — all verified byte-for-byte
+against Go2's actual configs, not re-derived from memory.
+
+Deliberately **not** adopted: unitree_rl_lab's `action_rate_l2 = -0.1` (10x ours). V4's whole
+direction was loosening restrictions that made standing still the safe default; a 10x jump on
+action smoothness pulls the opposite way and risks re-suppressing the exploration needed to
+find stepping at all — revisit only if V5 data shows action-rate cost isn't the bottleneck.
+Also not adopted: unitree_rl_lab's `energy` term (torque×velocity power penalty, redundant
+with the now-corrected `joint_torques_l2`) and its scaled (rather than gated) stand-still
+penalty — both reasonable, but out of scope for one review pass; noted here for a future one.
+
+V5 has not been trained yet — it's a code-level redesign pending a RunPod run.
+
 ---
 
 ## Status
@@ -328,7 +362,7 @@ the first fights natural gait oscillation and the last two hard-code a specific 
 | RViz2 visualisation | Done |
 | USD asset | Done |
 | Isaac Lab env (flat terrain) | Done |
-| RL training (flat terrain) | V4 redesign ready — V3 creep optimum root-caused, retraining pending |
+| RL training (flat terrain) | V5 redesign ready (V4 + real-repo audit fixes + command curriculum) — retraining pending |
 | Rough terrain curriculum | Not started |
 | ROS2 controllers | Not started |
 | Hardware bring-up | Not started |

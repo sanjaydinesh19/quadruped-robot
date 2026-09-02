@@ -60,6 +60,33 @@ def feet_slide(
     return reward
 
 
+def feet_air_time_variance(
+    env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """Penalize uneven air time across the four feet — pushes toward a synced,
+    alternating gait (diagonal trot pairs) instead of a single-leg shuffle.
+
+    Not a vendored IsaacLab term — no `feet_air_time_variance`/`air_time_variance`
+    ships in isaaclab.envs.mdp or isaaclab_tasks as of 2.3.x. Reconstructed here
+    from the term name + weight (-1.0) reported for Unitree's own
+    unitreerobotics/unitree_rl_lab Go2 velocity task, since that repo's exact
+    source wasn't fetchable at audit time. Uses the same `last_air_time` buffer
+    as `feet_air_time` above, so it costs nothing extra to compute.
+
+    Deliberately does NOT fix the V3/V4 zero-stepping problem by itself: a
+    planted-feet creep has all four air times near 0, so its *variance* is
+    already near 0 too — this term only bites once some stepping exists, to
+    stop it collapsing into an asymmetric one-leg shuffle instead of a proper
+    alternating trot. `feet_air_time` + the command-range change remain the
+    terms responsible for making stepping emerge in the first place.
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+    reward = torch.var(air_time, dim=1)
+    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
+    return reward
+
+
 def stand_still_joint_deviation_l1(
     env: ManagerBasedRLEnv,
     command_name: str,
